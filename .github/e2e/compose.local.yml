@@ -5,3 +5,6 @@ services:
   openclaw:
     ports:
       - "18789:18789"
+  dsh:
+    ports:
+      - "18790:18790"

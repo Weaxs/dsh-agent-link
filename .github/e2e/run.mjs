@@ -20,9 +20,13 @@ function agentConfig(kind) {
     ...(transport === 'ssh'
       ? { ssh: process.env[`${upper}_SSH_ALIAS`] ?? `${kind}-e2e`, sshConfig: process.env.E2E_SSH_CONFIG }
       : { host }),
-    port: Number(process.env[`${upper}_PORT`] ?? (kind === 'hermes' ? 8642 : 18789)),
-    token: process.env[kind === 'hermes' ? 'HERMES_API_KEY' : 'OPENCLAW_GATEWAY_TOKEN'],
+    port: Number(process.env[`${upper}_PORT`] ?? (kind === 'hermes' ? 8642 : kind === 'openclaw' ? 18789 : 18790)),
+    token:
+      process.env[
+        kind === 'hermes' ? 'HERMES_API_KEY' : kind === 'openclaw' ? 'OPENCLAW_GATEWAY_TOKEN' : 'DSH_GATEWAY_TOKEN'
+      ],
     ...(kind === 'openclaw' ? { origin: 'http://127.0.0.1:18789', openclawAgentId: 'main' } : {}),
+    ...(kind === 'dsh' ? { model: process.env.OPENAI_MODEL_NAME, dshProvider: 'openai', dshCwd: '/tmp' } : {}),
     connectTimeoutMs: 30_000,
   };
 }
@@ -70,7 +74,8 @@ function assertCompleted(job, marker, stage) {
 }
 
 const failures = [];
-for (const kind of ['hermes', 'openclaw']) {
+const targets = (process.env.E2E_TARGET ?? 'hermes,openclaw').split(',').filter(Boolean);
+for (const kind of targets) {
   try {
     await verify(kind);
   } catch (error) {
@@ -79,4 +84,4 @@ for (const kind of ['hermes', 'openclaw']) {
   }
 }
 if (failures.length > 0) throw new Error(`${label}: transport tests failed for ${failures.join(', ')}`);
-console.log(`E2E_PASS ${label}: Hermes and OpenClaw completed real model-backed tasks and continuations`);
+console.log(`E2E_PASS ${label}: ${targets.join(', ')} completed real model-backed tasks and continuations`);

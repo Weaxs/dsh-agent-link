@@ -22,8 +22,12 @@ export async function runDoctor(
       configs.map(async (config) => {
         const steps: DoctorStep[] = [];
         if ((config.transport ?? 'ssh') === 'ssh') {
+          const sshOptions = config.sshConfig ? ['-F', config.sshConfig] : [];
           try {
-            const { stdout } = await execute('ssh', ['-G', config.ssh!], { timeout: 10_000, maxBuffer: 2_000_000 });
+            const { stdout } = await execute('ssh', [...sshOptions, '-G', config.ssh!], {
+              timeout: 10_000,
+              maxBuffer: 2_000_000,
+            });
             const picked = stdout
               .split('\n')
               .filter((line) => /^(hostname|user|port|identityfile|proxycommand|proxyjump) /.test(line));
@@ -33,9 +37,13 @@ export async function runDoctor(
             return { id: config.id, steps };
           }
           try {
-            await execute('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', config.ssh!, 'echo', 'ok'], {
-              timeout: 15_000,
-            });
+            await execute(
+              'ssh',
+              [...sshOptions, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', config.ssh!, 'echo', 'ok'],
+              {
+                timeout: 15_000,
+              },
+            );
             steps.push({ name: 'ssh-login', ok: true, detail: 'Non-interactive SSH login succeeded.' });
           } catch (error) {
             steps.push(failure('ssh-login', error));
@@ -86,6 +94,8 @@ export function sshHint(text: string): string {
   if (value.includes('openclaw_session_token') || value.includes('openclaw_gateway_token'))
     return 'Set OPENCLAW_GATEWAY_TOKEN or configure tokenEnv.';
   if (value.includes('hermes_api_key')) return 'Set HERMES_API_KEY or configure tokenEnv.';
+  if (value.includes('launch token') || value.includes('dsh_gateway_token'))
+    return 'Copy the launch token from the remote dsh web URL into DSH_GATEWAY_TOKEN or configure tokenEnv.';
   return 'See docs/SSH.md. The plugin never changes ~/.ssh/config automatically.';
 }
 

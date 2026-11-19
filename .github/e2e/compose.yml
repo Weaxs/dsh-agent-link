@@ -5,7 +5,9 @@ x-openai-environment: &openai-environment
 services:
   hermes:
     image: nousresearch/hermes-agent:latest
+    profiles: [hermes]
     dns: [223.5.5.5, 119.29.29.29]
+    extra_hosts: ["${E2E_MODEL_HOST}:${E2E_MODEL_IP}"]
     command: gateway run
     environment:
       <<: *openai-environment
@@ -31,7 +33,9 @@ services:
 
   openclaw:
     image: openclaw/openclaw:latest
+    profiles: [openclaw]
     dns: [223.5.5.5, 119.29.29.29]
+    extra_hosts: ["${E2E_MODEL_HOST}:${E2E_MODEL_IP}"]
     entrypoint: ["tini", "-s", "--", "node", "openclaw.mjs", "gateway"]
     environment:
       OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
@@ -54,6 +58,7 @@ services:
 
   openclaw-approver:
     image: openclaw/openclaw:latest
+    profiles: [openclaw]
     network_mode: service:openclaw
     depends_on:
       openclaw:
@@ -65,3 +70,28 @@ services:
     volumes:
       - ./scripts/approve-openclaw.mjs:/e2e/approve-openclaw.mjs:ro
     command: ["node", "/e2e/approve-openclaw.mjs"]
+
+  dsh:
+    build:
+      context: .
+      dockerfile: dsh/Dockerfile
+    profiles: [dsh]
+    dns: [223.5.5.5, 119.29.29.29]
+    extra_hosts: ["${E2E_MODEL_HOST}:${E2E_MODEL_IP}"]
+    environment:
+      OPENAI_BASE_URL: ${E2E_CONTAINER_OPENAI_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME}
+    volumes:
+      - ./generated/dsh:/tmp/dsh-e2e
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const s=require('net').connect(18790,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 80

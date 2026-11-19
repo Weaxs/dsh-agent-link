@@ -25,6 +25,7 @@ services:
 
   hermes-tailscale:
     <<: *headscale-client-service
+    profiles: [hermes]
     network_mode: service:hermes
     depends_on:
       hermes:
@@ -37,6 +38,7 @@ services:
 
   openclaw-tailscale:
     <<: *headscale-client-service
+    profiles: [openclaw]
     network_mode: service:openclaw
     depends_on:
       openclaw:
@@ -47,7 +49,21 @@ services:
     volumes:
       - openclaw-tailscale-state:/var/lib/tailscale
 
+  dsh-tailscale:
+    <<: *headscale-client-service
+    profiles: [dsh]
+    network_mode: service:dsh
+    depends_on:
+      dsh:
+        condition: service_healthy
+    environment:
+      <<: *headscale-client-environment
+      TS_HOSTNAME: dsh-e2e-${E2E_NODE_SUFFIX}
+    volumes:
+      - dsh-tailscale-state:/var/lib/tailscale
+
 volumes:
   headscale-data:
   hermes-tailscale-state:
   openclaw-tailscale-state:
+  dsh-tailscale-state:

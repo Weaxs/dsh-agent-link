@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { DshAdapter } from './adapters/dsh.js';
 import { HermesAdapter } from './adapters/hermes.js';
 import { OpenClawAdapter } from './adapters/openclaw.js';
 import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.js';
@@ -36,7 +37,9 @@ export class AgentManager {
       sessionId ??
       (adapter.kind === 'hermes'
         ? `dsh_${randomUUID()}`
-        : `agent:${config.openclawAgentId ?? 'main'}:dsh-agent-link:${randomUUID()}`);
+        : adapter.kind === 'dsh'
+          ? randomUUID()
+          : `agent:${config.openclawAgentId ?? 'main'}:dsh-agent-link:${randomUUID()}`);
     const id = randomUUID();
     const job: AgentJob = {
       id,
@@ -135,7 +138,11 @@ export class AgentManager {
 }
 
 function defaultFactory(config: AgentConfig): AgentAdapter {
-  return config.kind === 'hermes' ? new HermesAdapter(config.id, config) : new OpenClawAdapter(config.id, config);
+  return config.kind === 'hermes'
+    ? new HermesAdapter(config.id, config)
+    : config.kind === 'openclaw'
+      ? new OpenClawAdapter(config.id, config)
+      : new DshAdapter(config.id, config);
 }
 
 export function fromConfig(config: PluginConfig): AgentManager {

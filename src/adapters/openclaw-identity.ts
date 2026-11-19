@@ -45,8 +45,8 @@ export function signClaim(
   const payload = [
     'v2',
     identity.deviceId,
-    'openclaw-control-ui',
-    'webchat',
+    'cli',
+    'operator',
     'operator',
     'operator.admin,operator.read,operator.write,operator.approvals,operator.pairing',
     String(signedAt),

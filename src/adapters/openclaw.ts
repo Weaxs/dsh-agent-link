@@ -183,7 +183,7 @@ export class OpenClawAdapter implements AgentAdapter {
     return this.gateway.request('connect', {
       minProtocol: 4,
       maxProtocol: 4,
-      client: { id: 'openclaw-control-ui', version: 'control-ui', platform: 'web', mode: 'webchat' },
+      client: { id: 'cli', version: '0.1.0', platform: process.platform, mode: 'operator' },
       role: 'operator',
       scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],
       auth: { token },

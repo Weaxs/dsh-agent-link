@@ -30,15 +30,15 @@ function normalizeAgent(agent: AgentConfig, ids: Set<string>): AgentConfig {
   if (!ID.test(agent.id)) throw new ConfigError(`invalid agent id: ${String(agent.id)}`);
   if (ids.has(agent.id)) throw new ConfigError(`duplicate agent id: ${agent.id}`);
   ids.add(agent.id);
-  if (agent.kind !== 'hermes' && agent.kind !== 'openclaw')
-    throw new ConfigError(`${agent.id}: kind must be hermes or openclaw`);
+  if (!['hermes', 'openclaw', 'dsh'].includes(agent.kind))
+    throw new ConfigError(`${agent.id}: kind must be hermes, openclaw, or dsh`);
   const transport = agent.transport ?? 'ssh';
   if (!['ssh', 'direct', 'local'].includes(transport)) throw new ConfigError(`${agent.id}: invalid transport`);
   if (agent.ssh !== undefined && (agent.ssh.startsWith('-') || !/^\S+$/.test(agent.ssh))) {
     throw new ConfigError(`${agent.id}: ssh must be one host alias without spaces`);
   }
   if (transport === 'ssh' && !agent.ssh) throw new ConfigError(`${agent.id}: ssh transport requires an ssh host alias`);
-  const defaultPort = agent.kind === 'openclaw' ? 18_789 : 8_642;
+  const defaultPort = agent.kind === 'openclaw' ? 18_789 : agent.kind === 'dsh' ? 18_790 : 8_642;
   const result: AgentConfig = { ...agent, transport, port: agent.port ?? defaultPort };
   port(result.port!, `${agent.id}.port`);
   if (transport !== 'ssh' && !result.host) result.host = '127.0.0.1';
@@ -57,6 +57,11 @@ function port(value: number, name: string): void {
 }
 
 export function secret(agent: AgentConfig, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const fallback = agent.kind === 'openclaw' ? 'OPENCLAW_GATEWAY_TOKEN' : 'HERMES_API_KEY';
+  const fallback =
+    agent.kind === 'openclaw'
+      ? 'OPENCLAW_GATEWAY_TOKEN'
+      : agent.kind === 'dsh'
+        ? 'DSH_GATEWAY_TOKEN'
+        : 'HERMES_API_KEY';
   return agent.token ?? env[agent.tokenEnv ?? fallback];
 }

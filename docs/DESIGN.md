@@ -4,7 +4,7 @@ Status: implemented initial architecture, with protocol compatibility continuing
 
 ## Goals
 
-1. Let a dsh session run tasks on remote Hermes and OpenClaw agents, continue those sessions, stream results, answer approvals, and cancel work.
+1. Let a dsh session run tasks on remote Hermes, OpenClaw, and dsh agents, continue those sessions, stream results, answer approvals where supported, and cancel work.
 2. Let remote agents read and watch explicitly shared local dsh sessions through MCP.
 3. Avoid third-party relays and avoid installing adapters on every remote harness.
 4. Keep protocol details behind adapters and network details behind transports.
@@ -16,7 +16,7 @@ The current release intentionally does not write to local dsh sessions through M
 ```text
 ┌──────────────────────── local dsh ────────────────────────┐
 │ dsh-agent-link                                            │
-│  adapters/    Hermes API Server, OpenClaw Gateway         │
+│  adapters/    Hermes, OpenClaw, native DSH Session RPC    │
 │  transports/  ssh (default), direct, local                │
 │  tools/       agent_list / agent_ask / agent_continue / … │
 │  manager      jobs, output, cancellation, notifications   │
@@ -39,7 +39,7 @@ Adapters own message semantics. Transports own connectivity. Neither layer conta
 ```ts
 interface AgentAdapter {
   id: string;
-  kind: 'hermes' | 'openclaw';
+  kind: 'hermes' | 'openclaw' | 'dsh';
   health(signal?): Promise<Record<string, unknown>>;
   listSessions(signal?): Promise<AgentSession[]>;
   prompt(sessionId: string | undefined, text: string, signal?): AsyncIterable<AgentEvent>;
@@ -68,7 +68,7 @@ Authentication uses `Authorization: Bearer …`, read from `token` or `tokenEnv`
 
 The adapter opens a Gateway WebSocket with subprotocol `json`, negotiates protocol version 4, waits for `connect.challenge`, and sends a `connect` request containing:
 
-- the `openclaw-control-ui` client descriptor,
+- the `cli` client descriptor with `operator` mode and the actual host platform,
 - operator role and scopes,
 - the gateway token,
 - a persistent Ed25519 device identity and a signature over the v2 claim,
@@ -79,6 +79,14 @@ Device keys live under `$DSH_HOME/agent-link/devices` with mode `0600`. The devi
 After pairing, the adapter uses `health`, `sessions.list`, `agent`, repeated `agent.wait` calls while a run is pending, and `sessions.abort` with the session `key`. RPC envelopes use `{ type: 'req', id, method, params }`, responses use `type: 'res'`, and streamed agent updates use `type: 'event'`. Reverse requests receive an explicit unsupported-method error instead of hanging.
 
 OpenClaw protocol behavior still needs validation against every target deployment version. `agent_link_doctor` is the first compatibility check.
+
+### Remote DSH
+
+The DSH adapter uses the native Web/API connection rather than the plugin's read-only MCP listener. `GET /connect?token=...&interactions=none` exchanges the launch token for an API Cookie. Calls then use the Connection envelope `{ type: 'client-request', rpcId, method: 'session/<method>', payload: { args } }` and check the nested `{ ok: true, value }` result.
+
+Session work uses `session/create`, optional `session/selectModel`, `session/prompt`, repeated `session/wait` calls while the Session is active, `session/list` for discovery, and `session/cancel` for cancellation. Assistant text is read only from durable `assistant/message` records. The launch token and API Cookie are never logged.
+
+Remote deployments should keep the native listener on loopback for SSH or configure a concrete bind IP and `--trusted-host` for a private network. The CI container uses a test-only Host-rewrite bridge to preserve that trust boundary.
 
 ## Transports
 
@@ -152,11 +160,11 @@ The current release has no `dsh_session_post` tool. Adding write access later re
 
 ## Validation and milestones
 
-Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, job lifecycle, local HTTP transport, and MCP authorization/read/watch behavior.
+Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, native DSH Session RPC, job lifecycle, local and SSH HTTP transports, and MCP authorization/read/watch behavior.
 
 Remaining deployment milestones:
 
-1. Validate Hermes and OpenClaw against real target versions and document their exact setup.
+1. Validate Hermes, OpenClaw, and remote DSH against real target versions and document their exact setup.
 2. Add persistent reconnect supervision and richer approval routing where each gateway supports it.
 3. Add a small sidebar status panel and Tailscale node discovery.
 4. Consider explicit write-enabled MCP sessions only after the read-only security boundary has been exercised.

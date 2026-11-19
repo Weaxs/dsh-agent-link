@@ -2,7 +2,7 @@
 
 ## Project overview
 
-`dsh-agent-link` connects DeepSeek Harness (dsh) with Hermes and OpenClaw through their native gateway interfaces. It provides model tools for remote tasks and a read-only MCP endpoint for allow-listed local dsh sessions.
+`dsh-agent-link` connects DeepSeek Harness (dsh) with Hermes, OpenClaw, and remote dsh instances through their native gateway interfaces. It provides model tools for remote tasks and a read-only MCP endpoint for allow-listed local dsh sessions.
 
 The architectural boundary is strict:
 
@@ -53,6 +53,7 @@ Do not mix these responsibilities. A new remote platform gets a new adapter; a n
 - Do not log SSH stderr without considering that it can contain usernames, hosts, paths, or command details. Doctor output is minimized and paired with remediation hints.
 - Hermes protocol changes belong in `hermes.ts` and, for SSE parsing only, `sse.ts`.
 - OpenClaw handshake changes belong in `openclaw.ts` and `openclaw-identity.ts`. The v2 claim has one canonical implementation.
+- Remote DSH calls belong in `dsh.ts` and use the native `/api/session/*` RPC contract with an API cookie from `/connect`; do not replace it with the read-only MCP listener.
 - Device identities are generated once, stored with mode `0600`, and reused. Never regenerate them on every connection.
 - Do not start a new remote gateway for every connection. Reuse the remote service already running.
 - Keep protocol fixtures free of real credentials and real session content.
@@ -98,9 +99,9 @@ Tests must cover behavior, not only types:
 - MCP authentication, initialize/list/call, allow-list denial, redaction, read, and watch.
 - Job completion, timeout, cancellation, and notification failure boundaries.
 
-A passing mock test does not prove compatibility with a real Hermes or OpenClaw deployment. State that distinction in delivery notes and run `agent_link_doctor` against a real host when one is available.
+A passing mock test does not prove compatibility with a real Hermes, OpenClaw, or remote DSH deployment. State that distinction in delivery notes and run `agent_link_doctor` against a real host when one is available.
 
-Real model-backed E2E coverage lives in `.github/e2e/` and `.github/workflows/e2e.yml`. SSH, Tailscale, local, and Headscale jobs must start actual official Hermes/OpenClaw services and complete an initial model task plus a same-session continuation. Never replace these with protocol mocks, skip missing credentials silently, or report a health check as an E2E pass. Read [docs/E2E.md](docs/E2E.md) before changing the infrastructure or required secrets.
+Real model-backed E2E coverage lives in `.github/e2e/` and `.github/workflows/e2e.yml`. The 12-job matrix must start actual Hermes, OpenClaw, or `dsh web` services for each transport/target pair and complete an initial model task plus a same-session continuation. Never replace these with protocol mocks, skip missing credentials silently, or report a health check as an E2E pass. Read [docs/E2E.md](docs/E2E.md) before changing the infrastructure or required secrets.
 
 ## Documentation
 

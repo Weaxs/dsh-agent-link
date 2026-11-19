@@ -1,17 +1,19 @@
 # Real end-to-end testing
 
-The `Transport Integration Tests` workflow starts the official Hermes and OpenClaw images and executes real model-backed tasks through the plugin. These tests do not use protocol mocks and do not treat a successful gateway startup as a passing test.
+The `Transport Integration Tests` workflow starts official Hermes and OpenClaw images and a real `dsh web` installation, then executes model-backed tasks through the plugin. These tests do not use protocol mocks and do not treat a successful gateway startup as a passing test.
 
 ## Jobs
 
-| Job                               | Actual network path                                                   | Additional infrastructure                                      |
-| --------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `Local / Hermes and OpenClaw`     | Plugin → loopback-published gateway port                              | Official agent containers                                      |
-| `SSH / Hermes and OpenClaw`       | Plugin → system OpenSSH `ssh -W` → SSH container → gateway            | `linuxserver/openssh-server`, ephemeral ED25519 key            |
-| `Tailscale / Hermes and OpenClaw` | Plugin → runner tailnet → sidecar tailnet IP → gateway                | Tailscale runner action and two Tailscale sidecars             |
-| `Headscale / Hermes and OpenClaw` | Plugin → self-hosted Headscale tailnet → sidecar tailnet IP → gateway | Headscale control plane inside the job, two Tailscale sidecars |
+The matrix reports **12 independent transport/target jobs**: every transport is tested separately with `hermes`, `openclaw`, and `dsh`.
 
-Every job tests **both Hermes and OpenClaw independently**:
+| Transport   | Actual network path                                                   | Additional infrastructure                                                         |
+| ----------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `local`     | Plugin → loopback-published gateway port                              | Official agent containers or the DSH test image                                   |
+| `ssh`       | Plugin → system OpenSSH `ssh -W` → SSH container → gateway            | `linuxserver/openssh-server` with its SSH tunnel mod and an ephemeral ED25519 key |
+| `tailscale` | Plugin → runner tailnet → sidecar tailnet IP → gateway                | Tailscale runner action and one sidecar per job                                   |
+| `headscale` | Plugin → self-hosted Headscale tailnet → sidecar tailnet IP → gateway | Headscale control plane and one Tailscale sidecar per job                         |
+
+Every job tests exactly one target:
 
 1. Check protocol health.
 2. Start a task that asks the model to remember and return a random token.
@@ -25,28 +27,24 @@ The second response verifies a real model invocation and remote session continui
 
 Configure these repository or organization Actions secrets:
 
-| Secret              | Used for                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `OPENAI_BASE_URL`   | OpenAI-compatible model API base URL, normally ending in `/v1`                                                                                   |
-| `OPENAI_API_KEY`    | Credential for that model API                                                                                                                    |
-| `OPENAI_MODEL_NAME` | Exact model ID used by both agents                                                                                                               |
-| `TAILSCALE_AUTHKEY` | **Reusable** Tailscale pre-auth key (`tskey-auth-...`, not an API/OAuth key) for the runner and two sidecars; required only by the Tailscale job |
+| Secret              | Used for                                                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_BASE_URL`   | OpenAI-compatible model API base URL, normally ending in `/v1`                                                                           |
+| `OPENAI_API_KEY`    | Credential for that model API                                                                                                            |
+| `OPENAI_MODEL_NAME` | Exact model ID used by all three targets                                                                                                 |
+| `TAILSCALE_AUTHKEY` | **Reusable** Tailscale pre-auth key (`tskey-auth-...`, not an API/OAuth key) for the runner and sidecar; required only by Tailscale jobs |
 
-Headscale needs no external account or secret. The job creates its own user and pre-auth keys.
+Headscale needs no external account or secret. Each job creates its own user and pre-auth keys. The DSH launch token is generated by `dsh web` inside the container and passed through a temporary file; it is not a repository secret.
 
-`HERMES_API_KEY` and `OPENCLAW_GATEWAY_TOKEN` in the workflow are fixed **ephemeral test gateway passwords**, not production credentials. They exist only inside the short-lived CI environment. Change them in `.github/workflows/e2e.yml` if your policy requires random values.
+`HERMES_API_KEY` and `OPENCLAW_GATEWAY_TOKEN` in the workflow are fixed **ephemeral test gateway passwords**, not production credentials. They exist only inside the short-lived CI environment.
 
 ## Model configuration
 
-Hermes receives:
+- Hermes receives a generated `config.yaml` with `model.provider: custom`, `model.default`, `base_url`, and `key_env: OPENAI_API_KEY`.
+- OpenClaw receives a generated `openclaw.json` using `models.providers.openai` with `openai-completions` and `agents.defaults.model.primary = openai/<model>`.
+- DSH receives the OpenAI-compatible environment and selects the exact model through native `session/selectModel` before prompting.
 
-- `OPENAI_BASE_URL`
-- `OPENAI_API_KEY`
-- a generated `config.yaml` with `model.provider: custom`, `model.default`, `base_url`, and `key_env: OPENAI_API_KEY`
-- `API_SERVER_ENABLED=true`
-- `API_SERVER_KEY=$HERMES_API_KEY`
-
-OpenClaw receives a generated `openclaw.json` using `models.providers.openai` with `openai-completions`, a text-only model entry, and `agents.defaults.model.primary = openai/<model>`. No tools are enabled for the test task.
+No tools are enabled for the test task. Containers use AliDNS (`223.5.5.5`) and DNSPod (`119.29.29.29`) because the configured model endpoint uses region-specific DNS answers. Tailscale sidecars do not replace those resolvers.
 
 If `OPENAI_BASE_URL` points to `127.0.0.1` or `localhost`, the generated container configuration rewrites the host to `host.docker.internal`. On Linux, Compose maps that name through `host-gateway`.
 
@@ -57,23 +55,37 @@ If `OPENAI_BASE_URL` points to `127.0.0.1` or `localhost`, the generated contain
 
 This is real OpenClaw pairing, not a bypass in the plugin. Each test run persists its own Ed25519 device identity for that gateway connection.
 
+## Remote DSH
+
+The DSH image starts `dsh web` on loopback, captures its random launch token, and exposes a test-only HTTP bridge that rewrites the Host header to that loopback authority. The adapter then uses the native endpoints:
+
+- `GET /connect?token=...&interactions=none`
+- `session/create`
+- `session/selectModel`
+- `session/prompt`
+- `session/wait`
+- `session/list`
+- `session/cancel`
+
+This keeps DSH's browser trust boundary intact while exercising the same RPC path over Local, SSH, Tailscale, and Headscale. It does not expose a wildcard DSH listener or replace authentication with a static token.
+
 ## Running the workflow
 
-Run **Transport Integration Tests** manually through `workflow_dispatch`, or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
+Run **Transport Integration Tests** manually through `workflow_dispatch`, optionally selecting one transport and one target, or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
 
-To run one transport locally with Docker and the same credentials:
+To run one transport/target locally with Docker and the same credentials:
 
 ```bash
 export OPENAI_BASE_URL='https://your-endpoint.example/v1'
 export OPENAI_API_KEY='...'
 export OPENAI_MODEL_NAME='your-model'
-bash .github/e2e/scripts/run-compose.sh local
+bash .github/e2e/scripts/run-compose.sh local dsh
 ```
 
-For the Tailscale mode, also export `TAILSCALE_AUTHKEY` and connect the local machine to the same tailnet first. The Headscale script starts its own control plane and joins the local machine to it. Docker is required for all four modes; installing Hermes or OpenClaw on the host is not.
+For Tailscale mode, also export `TAILSCALE_AUTHKEY` and connect the local machine to the same tailnet first. The Headscale script starts its own control plane and joins the local machine to it. Docker is required for all four modes; installing Hermes, OpenClaw, or DSH on the host is not.
 
 ## Logs and cleanup
 
-Each script uses a unique Compose project and removes containers, networks, and volumes on exit. On failure, the workflow uploads container logs as artifacts. Logs should not contain model credentials, but hostnames, device IDs, session IDs, and model output are expected test data.
+Each script uses a unique Compose project and removes containers, networks, and volumes on exit. On failure, the workflow uploads container and adapter logs as artifacts. Logs should not contain model credentials, but hostnames, device IDs, session IDs, and model output are expected test data.
 
-Model calls cost money and can take several minutes. The job timeout is 35 minutes; each adapter task has its own timeout as well.
+Model calls cost money and can take several minutes. Each job has a 35-minute timeout, and adapter tasks have their own timeout as well.

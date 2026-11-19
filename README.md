@@ -1,13 +1,13 @@
 # dsh-agent-link
 
-Connect **DeepSeek Harness (dsh)** with **Hermes** and **OpenClaw** through their native gateway interfaces. No hosted relay, no cloud broker, and no Mesh plugin on remote hosts.
+Connect **DeepSeek Harness (dsh)** with **Hermes**, **OpenClaw**, and remote **dsh** instances through their native gateway interfaces. No hosted relay, no cloud broker, and no Mesh plugin on remote hosts.
 
 - **dsh → remote agents:** start tasks, continue remote sessions, receive streamed output, answer approvals, and cancel runs.
 - **Remote agents → dsh:** expose explicitly allow-listed local dsh sessions through a read-only MCP endpoint.
 - **Three transports:** system OpenSSH by default, direct connections with a Tailscale preset, and local loopback.
 - **One installation:** only dsh installs this plugin. Remote agents keep their native gateway, credentials, tools, and sessions.
 
-> Status: early development. Hermes uses the API Server (`/v1/runs` and SSE). OpenClaw uses the Gateway WebSocket pairing protocol. Always run `agent_link_doctor` after configuring a host.
+> Status: early development. Hermes uses the API Server (`/v1/runs` and SSE). OpenClaw uses the Gateway WebSocket pairing protocol. Remote dsh uses the native `/api/session/*` RPC API. Always run `agent_link_doctor` after configuring a host.
 
 ## Packages
 
@@ -64,7 +64,17 @@ export OPENCLAW_GATEWAY_TOKEN='your-gateway-token'
 
 The plugin creates one persistent Ed25519 device identity per configured agent under `$DSH_HOME/agent-link/devices`. Approve that device in OpenClaw on first use. The device key is never sent to the model or written to logs.
 
-### 3. Add the dsh configuration
+### 3. Configure a remote dsh instance
+
+Start `dsh web` on the remote host and copy the launch token from its printed URL. Keep the native API on loopback for SSH, or configure a concrete bind IP and `--trusted-host` for a private network. Set the launch token locally:
+
+```bash
+export DSH_GATEWAY_TOKEN='the-token-from-the-remote-dsh-web-url'
+```
+
+The adapter exchanges that token through `/connect`, then uses `session/create`, `session/selectModel`, `session/prompt`, `session/wait`, and `session/cancel`. `model` and `dshProvider` are optional; omit them to use the remote instance's existing model selection.
+
+### 4. Add the dsh configuration
 
 Add agents to the `agent-link` row in the profile's `cordis.patch.yml`:
 
@@ -83,11 +93,18 @@ Add agents to the `agent-link` row in the profile's `cordis.patch.yml`:
         transport: direct
         host: claw-server
         port: 18789
+      - id: dsh-remote
+        kind: dsh
+        transport: ssh
+        ssh: dsh-box
+        port: 18790
+        model: your-model-id
+        dshProvider: openai
 ```
 
 SSH is the default when `transport` is omitted. `gpu-box` is an alias from `~/.ssh/config`, not a command line. Read [the SSH guide](docs/SSH.md) before the first connection.
 
-### 4. Check the connection
+### 5. Check the connection
 
 Ask dsh:
 
@@ -166,7 +183,7 @@ The SSH reverse-forward setup and Tailscale alternative are described in [docs/D
 | --------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `ssh` (default) | Existing SSH hosts                                    | Uses `ssh -W` with `BatchMode=yes`; no password prompts or custom SSH cryptography. |
 | `direct`        | Tailscale, Headscale, LAN, or another trusted network | Uses the configured host and port; set `tls: true` for HTTPS/WSS.                   |
-| `local`         | Hermes or OpenClaw on the same machine                | Defaults to `127.0.0.1`.                                                            |
+| `local`         | Hermes, OpenClaw, or dsh on the same machine          | Defaults to `127.0.0.1`.                                                            |
 
 ## Development
 

@@ -1,7 +1,7 @@
 {
   "name": "@weaxs/dsh-agent-link",
   "version": "0.1.0",
-  "description": "Connect DeepSeek Harness with Hermes and OpenClaw through their native gateways over SSH, Tailscale, or local transports, without a third-party relay.",
+  "description": "Connect DeepSeek Harness with Hermes, OpenClaw, and remote dsh instances through native gateways over SSH, Tailscale, or local transports.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -12,7 +12,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
   ctx.tools.register(
     defineTool({
       name: 'agent_list',
-      description: 'List remote Hermes and OpenClaw agents configured through dsh-agent-link.',
+      description: 'List remote Hermes, OpenClaw, and DSH agents configured through dsh-agent-link.',
       parameters: { health: { type: 'boolean', description: 'Also probe every agent gateway.' } },
       output,
       async execute(args) {
@@ -37,7 +37,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
     defineTool({
       name: 'agent_ask',
       description:
-        'Start a task on a remote Hermes or OpenClaw agent. Returns a job id immediately; use agent_status to read progress and agent_continue for follow-ups.',
+        'Start a task on a remote Hermes, OpenClaw, or DSH agent. Returns a job id immediately; use agent_status to read progress and agent_continue for follow-ups.',
       parameters: {
         agent: { type: 'string', required: true },
         task: { type: 'string', required: true },
@@ -55,7 +55,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
   ctx.tools.register(
     defineTool({
       name: 'agent_continue',
-      description: 'Send a follow-up message to the same remote Hermes or OpenClaw session.',
+      description: 'Send a follow-up message to the same remote Hermes, OpenClaw, or DSH session.',
       parameters: {
         agent: { type: 'string', required: true },
         session: { type: 'string', required: true },
@@ -88,7 +88,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
   ctx.tools.register(
     defineTool({
       name: 'agent_cancel',
-      description: 'Cancel a running task on a remote Hermes or OpenClaw agent.',
+      description: 'Cancel a running task on a remote Hermes, OpenClaw, or DSH agent.',
       parameters: { job: { type: 'string', required: true } },
       output,
       async execute(args) {

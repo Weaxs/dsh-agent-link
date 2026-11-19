@@ -12,7 +12,8 @@ const status = JSON.parse(stdout);
 const peers = Object.values(status.Peer ?? {});
 const suffix = process.env.E2E_NODE_SUFFIX ?? 'local';
 
-for (const kind of ['hermes', 'openclaw']) {
+const targets = (process.env.E2E_TARGET ?? 'hermes,openclaw').split(',').filter(Boolean);
+for (const kind of targets) {
   const hostname = `${kind}-e2e-${suffix}`;
   const peer = peers.find((item) => item.HostName === hostname);
   const ip = peer?.TailscaleIPs?.[0];
