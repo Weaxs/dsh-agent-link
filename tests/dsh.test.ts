@@ -22,11 +22,11 @@ class FakeTransport implements Transport {
         expect(args).toEqual({ _request: {} });
         return ok({ items: [{ sessionId: 'dsh-session-1', title: 'Remote' }] });
       case 'session/create':
-        return ok({ sessionId: args.sessionId, agentPreset: 'default' });
+        return ok({ sessionId: args.request.sessionId, agentPreset: 'default' });
       case 'session/selectModel':
-        return ok({ selected: { provider: args.provider, model: args.model } });
+        return ok({ selected: { provider: args.request.provider, model: args.request.model } });
       case 'session/prompt':
-        expect(args.content).toEqual([{ type: 'text', text: 'remember AL-TEST' }]);
+        expect(args.request.content).toEqual([{ type: 'text', text: 'remember AL-TEST' }]);
         return ok({ accepted: true });
       case 'session/wait':
         return ok({
@@ -92,7 +92,7 @@ describe('DSH adapter', () => {
     expect(events.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
     expect(transport.calls.some((call) => (call.body as any)?.method === 'session/selectModel')).toBe(true);
     expect(transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body).toMatchObject({
-      payload: { args: { afterSeq: 0, timeoutMs: 30_000 } },
+      payload: { args: { request: { afterSeq: 0, timeoutMs: 30_000 } } },
     });
     await adapter.cancel('dsh-session-1');
     await adapter.close();

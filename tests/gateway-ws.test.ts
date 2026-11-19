@@ -64,7 +64,7 @@ describe('OpenClaw WebSocket wire protocol', () => {
               type: 'res',
               id: frame.id,
               ok: true,
-              payload: { status: 'completed', output: 'wire result' },
+              payload: { status: 'ok', terminalReply: { text: 'wire result' } },
             }),
           );
         }

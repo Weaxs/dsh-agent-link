@@ -83,7 +83,14 @@ export class OpenClawAdapter implements AgentAdapter {
           completed.catch(() => {});
           continue;
         }
-        const textResult = textOf(result.value.output ?? result.value.result ?? result.value.message ?? result.value);
+        const textResult = textOf(
+          result.value.output ??
+            result.value.result ??
+            result.value.message ??
+            result.value.terminalReply ??
+            result.value.terminalReceipt ??
+            result.value,
+        );
         yield { type: 'final', text: textResult || output, stopReason: String(result.value.status ?? 'completed') };
         return;
       }

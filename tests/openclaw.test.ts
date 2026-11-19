@@ -33,7 +33,7 @@ class FakeGateway {
     if (method === 'sessions.list') return { sessions: [{ key: 'agent:main:main', displayName: 'Main' }] };
     if (method === 'sessions.create') return { sessionKey: params.key };
     if (method === 'agent') return { runId: 'run-1', sessionKey: params.sessionKey };
-    if (method === 'agent.wait') return { status: 'completed', output: 'finished' };
+    if (method === 'agent.wait') return { status: 'ok', terminalReply: { text: 'finished' } };
     if (method === 'sessions.abort') return {};
     throw new Error(`unexpected ${method}`);
   }
