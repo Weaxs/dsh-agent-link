@@ -40,7 +40,8 @@ if [[ "$mode" == headscale ]]; then
   sed "s|__HEADSCALE_GATEWAY_IP__|${HEADSCALE_GATEWAY_IP}|g" .github/e2e/headscale/config.yaml > .github/e2e/generated/headscale-config.yaml
 fi
 export E2E_CONTAINER_OPENAI_BASE_URL="$(node -e "process.stdout.write(process.env.OPENAI_BASE_URL.replace(/^(https?:\\/\\/)(?:127\\.0\\.0\\.1|localhost)(?=[:/]|$)/,'\$1host.docker.internal'))")"
-eval "$(node .github/e2e/scripts/model-network.mjs)"
+model_exports="$(node .github/e2e/scripts/model-network.mjs)"
+eval "$model_exports"
 
 npm run build
 node .github/e2e/scripts/write-config.mjs
