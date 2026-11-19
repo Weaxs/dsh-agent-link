@@ -29,6 +29,7 @@ derp:
     enabled: true
     region_id: 999
     region_code: e2e
+    private_key_path: /var/lib/headscale/derp_private.key
     stun_listen_addr: 0.0.0.0:3478
   urls: []
   auto_update_enabled: false

@@ -29,6 +29,7 @@ services:
 
   openclaw:
     image: openclaw/openclaw:latest
+    entrypoint: ["tini", "-s", "--", "node", "openclaw.mjs", "gateway"]
     environment:
       OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}

@@ -57,7 +57,6 @@ const config = {
       workspace: '/tmp/openclaw-e2e-workspace',
       skipBootstrap: true,
       timeoutSeconds: 180,
-      contextTokens: 64000,
     },
   },
   plugins: { enabled: true, allow: ['openai'], entries: { openai: { enabled: true } } },
