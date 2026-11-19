@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent Link",
+    "description": "通过 SSH、Tailscale 或本地传输连接 dsh 与 Hermes、OpenClaw 原生网关。运行远程任务、继续会话，并通过只读 MCP 端点共享白名单中的 dsh 会话。"
+  }
+}

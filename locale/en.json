@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent Link",
+    "description": "Connect dsh with Hermes and OpenClaw through their native gateways over SSH, Tailscale, or local transports. Run remote tasks, continue sessions, and share allow-listed dsh sessions through a read-only MCP endpoint."
+  }
+}

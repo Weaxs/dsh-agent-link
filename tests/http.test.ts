@@ -1,0 +1,29 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { NodeHttpTransport } from '../src/transports/http.js'
+
+let server: http.Server | undefined
+afterEach(async () => {
+  if (server) await new Promise<void>(resolve => server!.close(() => resolve()))
+  server = undefined
+})
+
+describe('HTTP transport', () => {
+  it('sends JSON requests over the local transport', async () => {
+    server = http.createServer((request, response) => {
+      let body = ''
+      request.on('data', chunk => { body += chunk })
+      request.on('end', () => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ method: request.method, body }))
+      })
+    })
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    const transport = new NodeHttpTransport('local', { id: 'x', kind: 'hermes', transport: 'local', host: '127.0.0.1', port })
+    const result = await transport.request({ method: 'POST', path: '/v1/test', body: { input: 'hello' } })
+    expect(result.status).toBe(200)
+    expect(JSON.parse(result.text)).toEqual({ method: 'POST', body: '{"input":"hello"}' })
+  })
+})

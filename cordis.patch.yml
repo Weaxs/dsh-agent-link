@@ -1,0 +1,3 @@
+- insert:
+    - id: agent-link
+      name: '@weaxs/dsh-agent-link'

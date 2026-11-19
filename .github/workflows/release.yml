@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Verify tag matches package version
+        run: node scripts/sync-version.mjs --check "${GITHUB_REF_NAME}"
+      - run: npm run check
+      - name: Publish scoped package
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish unscoped package
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          npm pack --pack-destination "$stage"
+          tar -xzf "$stage"/*.tgz -C "$stage"
+          cd "$stage/package"
+          npm pkg set name=dsh-agent-link
+          sed -i 's|@weaxs/dsh-agent-link|dsh-agent-link|g' cordis.patch.yml
+          grep -q "name: 'dsh-agent-link'" cordis.patch.yml
+          test -f dist/index.js
+          test -f icon.svg
+          test -f locale/en.json
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create GitHub Release
+        run: gh release create "${GITHUB_REF_NAME}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

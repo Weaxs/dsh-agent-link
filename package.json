@@ -1,34 +1,62 @@
 {
   "name": "@weaxs/dsh-agent-link",
-  "version": "0.0.1",
-  "description": "DeepSeek Harness (dsh) plugin that links dsh with Hermes, OpenClaw and other agents over Tailscale, SSH or local transports — no third-party relay. Placeholder release; under development.",
+  "version": "0.1.0",
+  "description": "Connect DeepSeek Harness with Hermes and OpenClaw through their native gateways over SSH, Tailscale, or local transports, without a third-party relay.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
   "files": [
+    "dist",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs"
   ],
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "hermes",
-    "openclaw",
-    "agent",
-    "multi-agent",
-    "tailscale",
-    "ssh"
-  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage",
+    "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run",
+    "release": "node scripts/sync-version.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "hermes", "openclaw", "multi-agent", "tailscale", "ssh"],
   "homepage": "https://github.com/Weaxs/dsh-agent-link#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Weaxs/dsh-agent-link.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Weaxs/dsh-agent-link/issues"
-  },
+  "repository": { "type": "git", "url": "git+https://github.com/Weaxs/dsh-agent-link.git" },
+  "bugs": { "url": "https://github.com/Weaxs/dsh-agent-link/issues" },
   "author": "Weaxs",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
+  "publishConfig": { "access": "public" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1 <5",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.0.16",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
   }
 }
