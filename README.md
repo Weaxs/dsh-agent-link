@@ -12,11 +12,12 @@ DeepSeek Harness（dsh）插件：把本地 dsh 与 Hermes、OpenClaw 等 Agent 
 
 | 传输 | 适用场景 |
 |---|---|
+| `ssh`（默认） | 能通过 SSH 登录的服务器，使用系统 OpenSSH（`ssh -W`）转接，远端无需开放额外端口 |
+| `direct`（提供 Tailscale 预设） | 跨机器，通过 Tailscale / Headscale / 局域网直连 |
 | `local` | Agent 与 dsh 在同一台机器上 |
-| `direct`（默认 Tailscale 预设） | 跨机器，通过 Tailscale / Headscale / 局域网直连 |
-| `ssh` | 没有加入 tailnet 的服务器，通过系统 OpenSSH（`ssh -W`）转接 |
 
-设计细节见 [docs/DESIGN.md](docs/DESIGN.md)。
+- 设计细节：[docs/DESIGN.md](docs/DESIGN.md)
+- SSH 配置指引（各云厂商差异、常见报错与修复）：[docs/SSH.md](docs/SSH.md)
 
 ## 包名
 
