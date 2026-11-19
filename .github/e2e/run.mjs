@@ -55,6 +55,16 @@ async function verify(kind) {
       }
     }
     console.log(`[e2e] ${label}/${kind}: health check passed; starting model task`);
+    if (kind === 'dsh') {
+      const catalog = await manager.adapter(config.id).catalog();
+      console.log(
+        `[e2e] ${label}/${kind}: model catalog ${JSON.stringify({
+          routableProviders: catalog.routableProviders,
+          groups: catalog.groups?.map((group) => ({ id: group.id, models: group.models?.map((model) => model.id) })),
+          failures: catalog.failures,
+        })}`,
+      );
+    }
     const first = manager.start(
       config.id,
       `Remember this exact token: ${marker}. Reply with only ${marker} and no other text. Do not call any tools.`,
