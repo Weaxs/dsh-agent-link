@@ -46,7 +46,7 @@ export function signClaim(
     'v2',
     identity.deviceId,
     'cli',
-    'operator',
+    'cli',
     'operator',
     'operator.admin,operator.read,operator.write,operator.approvals,operator.pairing',
     String(signedAt),

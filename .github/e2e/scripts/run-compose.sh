@@ -147,7 +147,10 @@ if [[ "$target" == dsh ]]; then
     sleep 2
   done
   if [[ "$token_ready" != true ]]; then echo 'DSH launch token was not written' >&2; exit 1; fi
-  export DSH_GATEWAY_TOKEN="$(cat .github/e2e/generated/dsh/token)"
+  DSH_GATEWAY_TOKEN="$(cat .github/e2e/generated/dsh/token)"
+  export DSH_GATEWAY_TOKEN
+  if [[ -z "${DSH_GATEWAY_TOKEN:-}" ]]; then echo 'DSH launch token is empty' >&2; exit 1; fi
+  echo "DSH launch token loaded (${#DSH_GATEWAY_TOKEN} characters)"
 fi
 
 node .github/e2e/run.mjs 2>&1 | tee ".github/e2e/generated/adapter-$mode-$target.log"

@@ -26,7 +26,9 @@ function agentConfig(kind) {
         kind === 'hermes' ? 'HERMES_API_KEY' : kind === 'openclaw' ? 'OPENCLAW_GATEWAY_TOKEN' : 'DSH_GATEWAY_TOKEN'
       ],
     ...(kind === 'openclaw' ? { origin: 'http://127.0.0.1:18789', openclawAgentId: 'main' } : {}),
-    ...(kind === 'dsh' ? { model: process.env.OPENAI_MODEL_NAME, dshProvider: 'openai', dshCwd: '/tmp' } : {}),
+    ...(kind === 'dsh'
+      ? { model: process.env.OPENAI_MODEL_NAME, dshProvider: 'openai', dshCwd: '/tmp', reasoningEffort: 'low' }
+      : {}),
     connectTimeoutMs: 30_000,
   };
 }

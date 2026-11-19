@@ -183,7 +183,7 @@ export class OpenClawAdapter implements AgentAdapter {
     return this.gateway.request('connect', {
       minProtocol: 4,
       maxProtocol: 4,
-      client: { id: 'cli', version: '0.1.0', platform: process.platform, mode: 'operator' },
+      client: { id: 'cli', version: '0.1.0', platform: process.platform, mode: 'cli' },
       role: 'operator',
       scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],
       auth: { token },

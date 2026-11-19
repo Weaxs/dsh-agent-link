@@ -87,7 +87,7 @@ describe('device identity', () => {
       'v2',
       first.deviceId,
       'cli',
-      'operator',
+      'cli',
       'operator',
       'operator.admin,operator.read,operator.write,operator.approvals,operator.pairing',
       String(first.signedAtMs),

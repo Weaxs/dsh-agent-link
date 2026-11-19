@@ -53,6 +53,7 @@ export class DshAdapter implements AgentAdapter {
             sessionId: actualId,
             provider: this.config.dshProvider ?? 'openai',
             model: this.config.model,
+            ...(this.config.reasoningEffort ? { reasoningEffort: this.config.reasoningEffort } : {}),
           },
           signal,
         );

@@ -68,7 +68,7 @@ Authentication uses `Authorization: Bearer …`, read from `token` or `tokenEnv`
 
 The adapter opens a Gateway WebSocket with subprotocol `json`, negotiates protocol version 4, waits for `connect.challenge`, and sends a `connect` request containing:
 
-- the `cli` client descriptor with `operator` mode and the actual host platform,
+- the `cli` client descriptor with `cli` mode, operator role, and the actual host platform,
 - operator role and scopes,
 - the gateway token,
 - a persistent Ed25519 device identity and a signature over the v2 claim,

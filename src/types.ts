@@ -20,6 +20,7 @@ export interface AgentConfig {
   openclawAgentId?: string;
   dshProvider?: string;
   dshCwd?: string;
+  reasoningEffort?: string;
   connectTimeoutMs?: number;
 }
 

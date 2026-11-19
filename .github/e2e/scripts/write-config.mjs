@@ -41,7 +41,7 @@ const config = {
             id: modelId,
             name: modelId,
             api: 'openai-completions',
-            reasoning: false,
+            reasoning: true,
             input: ['text'],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             contextWindow: 128000,
@@ -58,6 +58,7 @@ const config = {
       models: { [modelRef]: { agentRuntime: { id: 'pi' }, params: { transport: 'sse', openaiWsWarmup: false } } },
       workspace: '/tmp/openclaw-e2e-workspace',
       skipBootstrap: true,
+      thinkingDefault: 'low',
       timeoutSeconds: 180,
     },
   },
@@ -75,6 +76,8 @@ const hermesConfig = [
   '  provider: custom',
   `  base_url: ${JSON.stringify(containerBaseUrl)}`,
   '  key_env: OPENAI_API_KEY',
+  'agent:',
+  '  reasoning_effort: low',
   '',
 ].join('\n');
 writeFileSync(hermesOutput, hermesConfig, { mode: 0o644 });

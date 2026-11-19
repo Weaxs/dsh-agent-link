@@ -16,7 +16,7 @@ function capture(chunk) {
   output = `${output}${chunk.toString('utf8')}`.slice(-200_000);
   const match = output.match(/[?&]token=([^&\s]+)/);
   if (match && !tokenWritten) {
-    writeFileSync(`${tokenDirectory}/token`, decodeURIComponent(match[1]), { mode: 0o600 });
+    writeFileSync(`${tokenDirectory}/token`, decodeURIComponent(match[1]), { mode: 0o644 });
     tokenWritten = true;
   }
 }
