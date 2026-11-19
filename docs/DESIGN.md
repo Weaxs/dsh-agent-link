@@ -166,5 +166,5 @@ Remaining deployment milestones:
 - [Hermes programmatic integration](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration)
 - [ODSH-Bridge OpenClaw pairing reference](https://github.com/Mikoribbit/odsh-bridge)
 - [OpenClaw Gateway handshake](https://docs.openclaw.ai/gateway/protocol/handshake)
-- [Real E2E infrastructure](E2E.md)
+- [Transport integration test infrastructure](E2E.md)
 - [SSH setup guide](SSH.md)

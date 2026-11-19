@@ -1,6 +1,6 @@
 # Real end-to-end testing
 
-The `Real E2E` workflow starts the official Hermes and OpenClaw images and executes real model-backed tasks through the plugin. These tests do not use protocol mocks and do not treat a successful gateway startup as a passing test.
+The `Transport Integration Tests` workflow starts the official Hermes and OpenClaw images and executes real model-backed tasks through the plugin. These tests do not use protocol mocks and do not treat a successful gateway startup as a passing test.
 
 ## Jobs
 
@@ -59,7 +59,7 @@ This is real OpenClaw pairing, not a bypass in the plugin. Each test run persist
 
 ## Running the workflow
 
-Run **Real E2E** manually through `workflow_dispatch`, or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
+Run **Transport Integration Tests** manually through `workflow_dispatch`, or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
 
 To run one transport locally with Docker and the same credentials:
 

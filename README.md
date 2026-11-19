@@ -178,7 +178,7 @@ npm run build
 npm run check
 ```
 
-See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN.md) for the protocol architecture. Real model-backed E2E jobs for SSH, Tailscale, local, and Headscale are documented in [docs/E2E.md](docs/E2E.md).
+See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN.md) for the protocol architecture. Transport integration tests for SSH, Tailscale, local, and Headscale are documented in [docs/E2E.md](docs/E2E.md).
 
 ## Release
 

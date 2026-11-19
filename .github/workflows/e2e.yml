@@ -1,4 +1,4 @@
-name: Real E2E
+name: Transport Integration Tests
 
 on:
   workflow_dispatch:
