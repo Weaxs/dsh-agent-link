@@ -96,6 +96,22 @@ export class DshAdapter implements AgentAdapter {
           }
         }
         const cursor = Number(waited.state?.cursor ?? afterSeq);
+        if (process.env.AGENT_LINK_DEBUG_DSH === '1' && records.length === 0 && waited.reason !== 'timeout') {
+          const page = await this.rpc(
+            'events',
+            {
+              address: { kind: 'session', sessionId: actualId },
+              throughSeq: cursor,
+              maxMessages: 50,
+            },
+            signal,
+          );
+          const diagnosticRecords = (page.records ?? []).filter((record: any) => {
+            const type = String(record.event?.type ?? '');
+            return type.startsWith('assistant/') || type.includes('error') || type === 'turn/end';
+          });
+          console.error(`[dsh:${this.id}] session/events ${JSON.stringify({ ...page, records: diagnosticRecords })}`);
+        }
         this.cursors.set(actualId, Math.max(afterSeq, cursor));
         if (waited.reason !== 'timeout') {
           yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle') };
