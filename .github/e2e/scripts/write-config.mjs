@@ -84,7 +84,8 @@ const hermesConfig = [
 writeFileSync(hermesOutput, hermesConfig, { mode: 0o644 });
 chmodSync(hermesOutput, 0o644);
 const dshPatch = [
-  "- name: '@deepseek-ai/dsh-llm-pi-ai'",
+  '- id: llm-pi-ai',
+  "  name: '@deepseek-ai/dsh-llm-pi-ai'",
   '  config:',
   '    providers:',
   '      openai:',
