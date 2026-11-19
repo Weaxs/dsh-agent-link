@@ -160,7 +160,7 @@ export class DshAdapter implements AgentAdapter {
 function assistantText(record: any): string {
   const event = record?.event ?? record;
   if (event?.type !== 'assistant/message') return '';
-  const content = event.data?.content;
+  const content = event.data?.message?.content ?? event.data?.content;
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content.map((part) => (part?.type === 'text' ? String(part.text ?? '') : '')).join('');

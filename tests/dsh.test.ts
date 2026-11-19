@@ -36,7 +36,11 @@ class FakeTransport implements Transport {
             records: [
               {
                 type: 'event',
-                event: { type: 'assistant/message', seq: 7, data: { content: [{ type: 'text', text: 'AL-TEST' }] } },
+                event: {
+                  type: 'assistant/message',
+                  seq: 7,
+                  data: { message: { content: [{ type: 'text', text: 'AL-TEST' }] } },
+                },
               },
             ],
             truncated: false,
