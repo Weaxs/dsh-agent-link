@@ -6,7 +6,7 @@ const tokenDirectory = '/tmp/dsh-e2e';
 mkdirSync(tokenDirectory, { recursive: true });
 const child = spawn(
   'dsh',
-  ['web', '--host', '127.0.0.1', '--port', '18791', '--no-open', '--patch', '/tmp/dsh-e2e/patch.yml'],
+  ['--patch', '/tmp/dsh-e2e/patch.yml', 'web', '--host', '127.0.0.1', '--port', '18791', '--no-open'],
   {
     env: { ...process.env, DSH_HOME: '/tmp/dsh-home' },
     stdio: ['ignore', 'pipe', 'pipe'],
