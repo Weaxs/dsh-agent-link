@@ -91,6 +91,8 @@ const dshPatch = [
   '      openai:',
   '        apiKeyEnv: OPENAI_API_KEY',
   '        api: openai-completions',
+  '        compat:',
+  '          supportsDeveloperRole: false',
   `        baseURL: ${JSON.stringify(containerBaseUrl)}`,
   '        models:',
   `          - id: ${JSON.stringify(modelId)}`,

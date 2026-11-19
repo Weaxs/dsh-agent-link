@@ -74,6 +74,42 @@ afterEach(() => {
 });
 
 describe('DSH adapter', () => {
+  it('surfaces durable model failures when wait output is empty', async () => {
+    process.env.DSH_GATEWAY_TOKEN = 'launch-token';
+    class FailingTransport extends FakeTransport {
+      override async request(input: HttpRequest): Promise<HttpResponse> {
+        if (input.path === '/api/session/wait') {
+          return ok({
+            reason: 'idle',
+            state: { cursor: 19, active: true, running: false, queue: [], pendingInput: [] },
+            output: { records: [], truncated: false },
+          });
+        }
+        if (input.path === '/api/session/events') {
+          return ok({
+            cursor: 19,
+            hasMore: false,
+            records: [
+              {
+                type: 'event',
+                event: {
+                  type: 'turn/end',
+                  seq: 19,
+                  data: { reason: { kind: 'error', error: { message: '400: {"code":"1214"}' } } },
+                },
+              },
+            ],
+          });
+        }
+        return super.request(input);
+      }
+    }
+    const adapter = new DshAdapter('remote', { id: 'remote', kind: 'dsh', transport: 'local' }, new FailingTransport());
+    const events = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'error', text: '400: {"code":"1214"}' });
+  });
+
   it('uses native session RPC with an API cookie and returns assistant output', async () => {
     process.env.DSH_GATEWAY_TOKEN = 'launch-token';
     const transport = new FakeTransport();

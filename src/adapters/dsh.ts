@@ -96,7 +96,7 @@ export class DshAdapter implements AgentAdapter {
           }
         }
         const cursor = Number(waited.state?.cursor ?? afterSeq);
-        if (process.env.AGENT_LINK_DEBUG_DSH === '1' && records.length === 0 && waited.reason !== 'timeout') {
+        if (records.length === 0 && waited.reason !== 'timeout') {
           const page = await this.rpc(
             'events',
             {
@@ -106,11 +106,15 @@ export class DshAdapter implements AgentAdapter {
             },
             signal,
           );
-          const diagnosticRecords = (page.records ?? []).filter((record: any) => {
-            const type = String(record.event?.type ?? '');
-            return type.startsWith('assistant/') || type.includes('error') || type === 'turn/end';
-          });
-          console.error(`[dsh:${this.id}] session/events ${JSON.stringify({ ...page, records: diagnosticRecords })}`);
+          if (process.env.AGENT_LINK_DEBUG_DSH === '1') {
+            const diagnosticRecords = (page.records ?? []).filter((record: any) => {
+              const type = String(record.event?.type ?? '');
+              return type.startsWith('assistant/') || type.includes('error') || type === 'turn/end';
+            });
+            console.error(`[dsh:${this.id}] session/events ${JSON.stringify({ ...page, records: diagnosticRecords })}`);
+          }
+          const failure = durableFailure(page.records ?? []);
+          if (failure) throw new Error(failure);
         }
         this.cursors.set(actualId, Math.max(afterSeq, cursor));
         if (waited.reason !== 'timeout') {
@@ -174,6 +178,24 @@ export class DshAdapter implements AgentAdapter {
     }
     return result.value;
   }
+}
+
+function durableFailure(records: any[]): string | undefined {
+  for (const record of records) {
+    const event = record?.event ?? record;
+    if (event?.type === 'turn/end' && event.data?.reason?.kind === 'error') {
+      return String(event.data.reason.error?.message ?? 'Remote DSH turn failed');
+    }
+    if (event?.type === 'assistant/attempt') {
+      for (const frame of event.data?.stream ?? []) {
+        const reason = frame?.chunk?.reason;
+        if (frame?.chunk?.type === 'finish' && reason?.kind === 'error') {
+          return String(reason.failure?.message ?? 'Remote DSH model attempt failed');
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 function assistantText(record: any): string {
