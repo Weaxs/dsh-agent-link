@@ -2,12 +2,12 @@ services:
   hermes:
     ports:
       - "18642:8642"
+      - "18792:18792"
   openclaw:
     ports:
       - "18789:18789"
+      - "18792:18792"
   dsh:
     ports:
       - "18790:18790"
-  acp:
-    ports:
       - "18792:18792"

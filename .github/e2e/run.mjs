@@ -62,7 +62,7 @@ async function verify(kind) {
         await manager.adapter(config.id).health();
         break;
       } catch (error) {
-        const message = String(error?.message ?? error);
+        const message = `${String(error?.message ?? error)} ${String(error?.data?.details ?? '')}`;
         const pairing = /pairing|not approved|not-paired/i.test(message);
         const transient = /ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(message);
         if ((!pairing && !transient) || Date.now() >= deadline) throw error;
