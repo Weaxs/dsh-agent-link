@@ -89,9 +89,6 @@ export class DshAdapter implements AgentAdapter {
           },
           signal,
         );
-        if (process.env.AGENT_LINK_DEBUG_DSH === '1' && waited.reason !== 'timeout') {
-          console.error(`[dsh:${this.id}] session/wait ${JSON.stringify(waited)}`);
-        }
         const records = waited.output?.records ?? [];
         for (const record of records) {
           const text = assistantText(record);
@@ -111,13 +108,6 @@ export class DshAdapter implements AgentAdapter {
             },
             signal,
           );
-          if (process.env.AGENT_LINK_DEBUG_DSH === '1') {
-            const diagnosticRecords = (page.records ?? []).filter((record: any) => {
-              const type = String(record.event?.type ?? '');
-              return type.startsWith('assistant/') || type.includes('error') || type === 'turn/end';
-            });
-            console.error(`[dsh:${this.id}] session/events ${JSON.stringify({ ...page, records: diagnosticRecords })}`);
-          }
           const failure = durableFailure(page.records ?? []);
           if (failure) throw new Error(failure);
         }

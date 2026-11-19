@@ -1,6 +1,6 @@
 # Agent Link design
 
-Status: implemented initial architecture, with protocol compatibility continuing to evolve alongside Hermes, OpenClaw, and dsh release candidates.
+Status: implemented and validated by real model-backed E2E across 12 transport/target combinations.
 
 ## Goals
 
@@ -84,7 +84,7 @@ OpenClaw protocol behavior still needs validation against every target deploymen
 
 The DSH adapter uses the native Web/API connection rather than the plugin's read-only MCP listener. `GET /connect?token=...&interactions=none` exchanges the launch token for an API Cookie. Calls then use the Connection envelope `{ type: 'client-request', rpcId, method: 'session/<method>', payload: { args } }` and check the nested `{ ok: true, value }` result.
 
-Session work uses `session/create`, optional `session/selectModel`, `session/prompt`, repeated `session/wait` calls while the Session is active, `session/list` for discovery, and `session/cancel` for cancellation. Assistant text is read only from durable `assistant/message` records. The launch token and API Cookie are never logged.
+Session work uses `session/create`, optional `session/selectModel`, `session/prompt`, repeated `session/wait` calls while the Session is active, `session/list` for discovery, and `session/cancel` for cancellation. RPC arguments use the Remote method's parameter envelope (`request`, or `_request` for `session/list`). The adapter remembers requested-to-actual Session ID mappings so continuations prompt the existing Session instead of creating a new one. Assistant text is read only from durable `assistant/message.data.message.content` records; an empty wait output triggers a durable event read so model failures are reported instead of becoming empty successful jobs. The launch token and API Cookie are never logged.
 
 Remote deployments should keep the native listener on loopback for SSH or configure a concrete bind IP and `--trusted-host` for a private network. The CI container uses a test-only Host-rewrite bridge to preserve that trust boundary.
 
@@ -160,14 +160,13 @@ The current release has no `dsh_session_post` tool. Adding write access later re
 
 ## Validation and milestones
 
-Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, native DSH Session RPC, job lifecycle, local and SSH HTTP transports, and MCP authorization/read/watch behavior.
+Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, native DSH Session RPC, job lifecycle, local and SSH HTTP transports, and MCP authorization/read/watch behavior. The transport matrix also completes real model-backed initial tasks and same-session continuations for Hermes, OpenClaw, and remote DSH over Local, SSH, Tailscale, and Headscale.
 
 Remaining deployment milestones:
 
-1. Validate Hermes, OpenClaw, and remote DSH against real target versions and document their exact setup.
-2. Add persistent reconnect supervision and richer approval routing where each gateway supports it.
-3. Add a small sidebar status panel and Tailscale node discovery.
-4. Consider explicit write-enabled MCP sessions only after the read-only security boundary has been exercised.
+1. Add persistent reconnect supervision and richer approval routing where each gateway supports it.
+2. Add a small sidebar status panel and Tailscale node discovery.
+3. Consider explicit write-enabled MCP sessions only after the read-only security boundary has been exercised.
 
 ## Repository references
 

@@ -42,7 +42,7 @@ Headscale needs no external account or secret. Each job creates its own user and
 
 - Hermes receives a generated `config.yaml` with `model.provider: custom`, `model.default`, `base_url`, and `key_env: OPENAI_API_KEY`.
 - OpenClaw receives a generated `openclaw.json` using `models.providers.openai` with `openai-completions` and `agents.defaults.model.primary = openai/<model>`.
-- DSH receives the OpenAI-compatible environment and selects the exact model through native `session/selectModel` before prompting.
+- DSH receives a profile patch targeting `llm-pi-ai`. It declares the exact model on an `openai-completions` route, enables `low` reasoning for models that cannot disable thinking, disables the unsupported `developer` role for GLM compatibility, and selects the model through native `session/selectModel` before prompting.
 
 No tools are enabled for the test task. Containers use AliDNS (`223.5.5.5`) and DNSPod (`119.29.29.29`) because the configured model endpoint uses region-specific DNS answers. The runner also tries DoH providers and writes a returned IPv4 address into container `/etc/hosts`; a public regional-DNS fallback mapping in `.github/workflows/e2e.yml` is used only when those providers return NXDOMAIN. Tailscale sidecars do not replace those resolvers.
 
