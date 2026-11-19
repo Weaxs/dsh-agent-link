@@ -64,7 +64,8 @@ async function verify(kind) {
       } catch (error) {
         const message = `${String(error?.message ?? error)} ${String(error?.data?.details ?? '')}`;
         const pairing = /pairing|not approved|not-paired/i.test(message);
-        const transient = /ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(message);
+        const transient =
+          /ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|socket hang up|timed out|timeout/i.test(message);
         if ((!pairing && !transient) || Date.now() >= deadline) throw error;
         const reason = pairing ? 'waiting for OpenClaw device approval' : 'waiting for the transport to become ready';
         if (waitingReason !== reason) console.log(`[e2e] ${label}/${kind}: ${reason}`);
