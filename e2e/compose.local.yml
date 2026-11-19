@@ -1,0 +1,7 @@
+services:
+  hermes:
+    ports:
+      - "18642:8642"
+  openclaw:
+    ports:
+      - "18789:18789"

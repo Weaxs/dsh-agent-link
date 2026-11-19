@@ -78,6 +78,7 @@ npx vitest run tests/<name>.test.ts -t "<case>"
 Before every commit, run:
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
@@ -98,6 +99,8 @@ Tests must cover behavior, not only types:
 - Job completion, timeout, cancellation, and notification failure boundaries.
 
 A passing mock test does not prove compatibility with a real Hermes or OpenClaw deployment. State that distinction in delivery notes and run `agent_link_doctor` against a real host when one is available.
+
+Real model-backed E2E coverage lives in `e2e/` and `.github/workflows/e2e.yml`. SSH, Tailscale, local, and Headscale jobs must start actual official Hermes/OpenClaw services and complete an initial model task plus a same-session continuation. Never replace these with protocol mocks, skip missing credentials silently, or report a health check as an E2E pass. Read [docs/E2E.md](docs/E2E.md) before changing the infrastructure or required secrets.
 
 ## Documentation
 

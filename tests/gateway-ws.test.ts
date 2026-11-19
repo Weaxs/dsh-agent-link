@@ -1,58 +1,93 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { WebSocketServer } from 'ws'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { OpenClawAdapter } from '../src/adapters/openclaw.js'
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { WebSocketServer } from 'ws';
+import { OpenClawAdapter } from '../src/adapters/openclaw.js';
 
-let server: WebSocketServer | undefined
+let server: WebSocketServer | undefined;
 afterEach(async () => {
   if (server) {
-    for (const client of server.clients) client.terminate()
-    await new Promise<void>(resolve => server!.close(() => resolve()))
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
   }
-  server = undefined
-  delete process.env.OPENCLAW_GATEWAY_TOKEN
-  delete process.env.DSH_AGENT_LINK_STATE_DIR
-})
+  server = undefined;
+  delete process.env.OPENCLAW_GATEWAY_TOKEN;
+  delete process.env.DSH_AGENT_LINK_STATE_DIR;
+});
 
 describe('OpenClaw WebSocket wire protocol', () => {
   it('performs the challenge handshake and JSON-RPC calls', async () => {
-    const received: any[] = []
-    server = new WebSocketServer({ host: '127.0.0.1', port: 0, handleProtocols: () => 'json' })
-    server.on('connection', socket => {
-      socket.send(JSON.stringify({ type: 'event', event: 'connect.challenge', payload: { nonce: 'wire-nonce' } }))
-      socket.on('message', data => {
-        const frame = JSON.parse(data.toString())
-        received.push(frame)
+    const received: any[] = [];
+    server = new WebSocketServer({ host: '127.0.0.1', port: 0, handleProtocols: () => 'json' });
+    server.on('connection', (socket) => {
+      socket.send(
+        JSON.stringify({
+          type: 'event',
+          event: 'connect.challenge',
+          payload: { nonce: 'wire-nonce', ts: 1737264000000 },
+        }),
+      );
+      socket.on('message', (data) => {
+        const frame = JSON.parse(data.toString());
+        received.push(frame);
         if (frame.method === 'connect') {
-          expect(frame.params.device.nonce).toBe('wire-nonce')
-          expect(frame.params.device.signature).not.toBe('')
-          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { type: 'hello-ok' } }))
+          expect(frame.params.device.nonce).toBe('wire-nonce');
+          expect(frame.params.device.signature).not.toBe('');
+          expect(frame.params.device.signedAt).toBe(1737264000000);
+          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { type: 'hello-ok' } }));
         } else if (frame.method === 'health') {
-          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { ok: true } }))
+          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { ok: true } }));
+        } else if (frame.method === 'sessions.create') {
+          socket.send(
+            JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { sessionKey: frame.params.key } }),
+          );
         } else if (frame.method === 'agent') {
-          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { runId: 'run-wire', sessionKey: frame.params.sessionKey } }))
-          socket.send(JSON.stringify({ type: 'event', event: 'agent', payload: { runId: 'run-wire', type: 'message.delta', delta: 'wire ' } }))
+          socket.send(
+            JSON.stringify({
+              type: 'res',
+              id: frame.id,
+              ok: true,
+              payload: { runId: 'run-wire', sessionKey: frame.params.sessionKey },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'event',
+              event: 'agent',
+              payload: { runId: 'run-wire', type: 'message.delta', delta: 'wire ' },
+            }),
+          );
         } else if (frame.method === 'agent.wait') {
-          socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: true, payload: { status: 'completed', output: 'wire result' } }))
+          socket.send(
+            JSON.stringify({
+              type: 'res',
+              id: frame.id,
+              ok: true,
+              payload: { status: 'completed', output: 'wire result' },
+            }),
+          );
         }
-      })
-    })
-    await new Promise<void>(resolve => server!.once('listening', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('expected TCP address')
-    process.env.OPENCLAW_GATEWAY_TOKEN = 'token'
-    process.env.DSH_AGENT_LINK_STATE_DIR = mkdtempSync(join(tmpdir(), 'agent-link-wire-'))
+      });
+    });
+    await new Promise<void>((resolve) => server!.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('expected TCP address');
+    process.env.OPENCLAW_GATEWAY_TOKEN = 'token';
+    process.env.DSH_AGENT_LINK_STATE_DIR = mkdtempSync(join(tmpdir(), 'agent-link-wire-'));
     const adapter = new OpenClawAdapter('wire', {
-      id: 'wire', kind: 'openclaw', transport: 'direct', host: '127.0.0.1', port: address.port,
+      id: 'wire',
+      kind: 'openclaw',
+      transport: 'direct',
+      host: '127.0.0.1',
+      port: address.port,
       origin: `http://127.0.0.1:${address.port}`,
-    })
-    expect(await adapter.health()).toEqual({ ok: true })
-    const events = []
-    for await (const event of adapter.prompt('agent:main:wire', 'hello')) events.push(event)
-    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'wire result' })
-    expect(received.some(frame => frame.method === 'agent' && frame.params.idempotencyKey)).toBe(true)
-    await adapter.close()
-  })
-})
+    });
+    expect(await adapter.health()).toEqual({ ok: true });
+    const events = [];
+    for await (const event of adapter.prompt('agent:main:wire', 'hello')) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'wire result' });
+    expect(received.some((frame) => frame.method === 'agent' && frame.params.idempotencyKey)).toBe(true);
+    await adapter.close();
+  });
+});

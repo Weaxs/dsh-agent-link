@@ -1,100 +1,101 @@
-import type { IncomingMessage } from 'node:http'
-import type { Duplex } from 'node:stream'
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 
-export type TransportKind = 'ssh' | 'direct' | 'local'
-export type AgentKind = 'hermes' | 'openclaw'
+export type TransportKind = 'ssh' | 'direct' | 'local';
+export type AgentKind = 'hermes' | 'openclaw';
 
 export interface AgentConfig {
-  id: string
-  kind: AgentKind
-  transport?: TransportKind
-  ssh?: string
-  host?: string
-  port?: number
-  tls?: boolean
-  token?: string
-  tokenEnv?: string
-  origin?: string
-  model?: string
-  openclawAgentId?: string
-  connectTimeoutMs?: number
+  id: string;
+  kind: AgentKind;
+  transport?: TransportKind;
+  ssh?: string;
+  sshConfig?: string;
+  host?: string;
+  port?: number;
+  tls?: boolean;
+  token?: string;
+  tokenEnv?: string;
+  origin?: string;
+  model?: string;
+  openclawAgentId?: string;
+  connectTimeoutMs?: number;
 }
 
 export interface McpConfig {
-  enabled?: boolean
-  host?: string
-  port?: number
-  token?: string
-  tokenEnv?: string
-  allowSessions?: string[]
-  maxEventBytes?: number
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  token?: string;
+  tokenEnv?: string;
+  allowSessions?: string[];
+  maxEventBytes?: number;
 }
 
 export interface PluginConfig {
-  agents?: AgentConfig[]
-  mcp?: McpConfig
-  jobTimeoutMs?: number
+  agents?: AgentConfig[];
+  mcp?: McpConfig;
+  jobTimeoutMs?: number;
 }
 
 export interface AgentEvent {
-  type: 'text' | 'tool' | 'approval' | 'final' | 'error'
-  text?: string
-  name?: string
-  phase?: 'start' | 'end'
-  requestId?: string
-  choices?: string[]
-  stopReason?: string
+  type: 'text' | 'tool' | 'approval' | 'final' | 'error';
+  text?: string;
+  name?: string;
+  phase?: 'start' | 'end';
+  requestId?: string;
+  choices?: string[];
+  stopReason?: string;
 }
 
 export interface AgentSession {
-  id: string
-  title?: string
-  updatedAt?: string | number
+  id: string;
+  title?: string;
+  updatedAt?: string | number;
 }
 
 export interface AgentAdapter {
-  readonly id: string
-  readonly kind: AgentKind
-  health(signal?: AbortSignal): Promise<Record<string, unknown>>
-  listSessions(signal?: AbortSignal): Promise<AgentSession[]>
-  prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent>
-  cancel(sessionId: string, signal?: AbortSignal): Promise<void>
-  respond?(sessionId: string, requestId: string, choice: string, signal?: AbortSignal): Promise<void>
-  close(): Promise<void>
+  readonly id: string;
+  readonly kind: AgentKind;
+  health(signal?: AbortSignal): Promise<Record<string, unknown>>;
+  listSessions(signal?: AbortSignal): Promise<AgentSession[]>;
+  prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent>;
+  cancel(sessionId: string, signal?: AbortSignal): Promise<void>;
+  respond?(sessionId: string, requestId: string, choice: string, signal?: AbortSignal): Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface HttpRequest {
-  method?: string
-  path: string
-  headers?: Record<string, string>
-  body?: unknown
-  signal?: AbortSignal
+  method?: string;
+  path: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  signal?: AbortSignal;
 }
 
 export interface HttpResponse {
-  status: number
-  headers: Record<string, string | string[] | undefined>
-  text: string
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  text: string;
 }
 
 export interface Transport {
-  readonly kind: TransportKind
-  request(request: HttpRequest): Promise<HttpResponse>
-  stream(request: HttpRequest): Promise<IncomingMessage>
-  socket?(): Duplex
-  close(): Promise<void>
+  readonly kind: TransportKind;
+  request(request: HttpRequest): Promise<HttpResponse>;
+  stream(request: HttpRequest): Promise<IncomingMessage>;
+  socket?(): Duplex;
+  close(): Promise<void>;
 }
 
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentJob {
-  id: string
-  agentId: string
-  sessionId?: string
-  status: JobStatus
-  createdAt: number
-  updatedAt: number
-  text: string
-  error?: string
-  pendingApproval?: { requestId: string; choices: string[]; text?: string }
+  id: string;
+  agentId: string;
+  sessionId?: string;
+  status: JobStatus;
+  createdAt: number;
+  updatedAt: number;
+  text: string;
+  error?: string;
+  pendingApproval?: { requestId: string; choices: string[]; text?: string };
 }

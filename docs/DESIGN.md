@@ -38,14 +38,14 @@ Adapters own message semantics. Transports own connectivity. Neither layer conta
 
 ```ts
 interface AgentAdapter {
-  id: string
-  kind: 'hermes' | 'openclaw'
-  health(signal?): Promise<Record<string, unknown>>
-  listSessions(signal?): Promise<AgentSession[]>
-  prompt(sessionId: string | undefined, text: string, signal?): AsyncIterable<AgentEvent>
-  cancel(sessionId: string, signal?): Promise<void>
-  respond?(sessionId: string, requestId: string, choice: string, signal?): Promise<void>
-  close(): Promise<void>
+  id: string;
+  kind: 'hermes' | 'openclaw';
+  health(signal?): Promise<Record<string, unknown>>;
+  listSessions(signal?): Promise<AgentSession[]>;
+  prompt(sessionId: string | undefined, text: string, signal?): AsyncIterable<AgentEvent>;
+  cancel(sessionId: string, signal?): Promise<void>;
+  respond?(sessionId: string, requestId: string, choice: string, signal?): Promise<void>;
+  close(): Promise<void>;
 }
 ```
 
@@ -66,17 +66,17 @@ Authentication uses `Authorization: Bearer …`, read from `token` or `tokenEnv`
 
 ### OpenClaw
 
-The adapter opens a Gateway WebSocket with subprotocol `json`, waits for `connect.challenge`, and sends a `connect` request containing:
+The adapter opens a Gateway WebSocket with subprotocol `json`, negotiates protocol version 4, waits for `connect.challenge`, and sends a `connect` request containing:
 
 - the `openclaw-control-ui` client descriptor,
 - operator role and scopes,
 - the gateway token,
 - a persistent Ed25519 device identity and a signature over the v2 claim,
-- the server nonce and signing timestamp.
+- the server nonce and the challenge's `ts` as `device.signedAt`.
 
 Device keys live under `$DSH_HOME/agent-link/devices` with mode `0600`. The device ID is the SHA-256 hash of the public key's raw x coordinate. The signing format is isolated in `openclaw-identity.ts` so upstream protocol changes have one review point.
 
-After pairing, the adapter uses `health`, `sessions.list`, `agent`, `agent.wait`, and `sessions.abort`. RPC envelopes use `{ type: 'req', id, method, params }`, responses use `type: 'res'`, and streamed agent updates use `type: 'event'`. Reverse requests receive an explicit unsupported-method error instead of hanging.
+After pairing, the adapter uses `health`, `sessions.list`, `agent`, repeated `agent.wait` calls while a run is pending, and `sessions.abort` with the session `key`. RPC envelopes use `{ type: 'req', id, method, params }`, responses use `type: 'res'`, and streamed agent updates use `type: 'event'`. Reverse requests receive an explicit unsupported-method error instead of hanging.
 
 OpenClaw protocol behavior still needs validation against every target deployment version. `agent_link_doctor` is the first compatibility check.
 
@@ -125,11 +125,11 @@ The endpoint supports JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/ca
 
 Tools:
 
-| Tool | Behavior | Permission |
-|---|---|---|
-| `dsh_sessions_list` | List only allow-listed dsh sessions. | read |
-| `dsh_session_read` | Read a message-aligned history page through `sessionController.events`. | read |
-| `dsh_session_watch` | Follow a session and return new frames plus a cursor. | read |
+| Tool                | Behavior                                                                | Permission |
+| ------------------- | ----------------------------------------------------------------------- | ---------- |
+| `dsh_sessions_list` | List only allow-listed dsh sessions.                                    | read       |
+| `dsh_session_read`  | Read a message-aligned history page through `sessionController.events`. | read       |
+| `dsh_session_watch` | Follow a session and return new frames plus a cursor.                   | read       |
 
 Authentication uses a bearer token from `token` or `tokenEnv` (default `DSH_AGENT_LINK_TOKEN`). Startup fails closed if MCP is enabled without a token. `allowSessions` defaults to an empty set.
 
@@ -165,4 +165,6 @@ Remaining deployment milestones:
 
 - [Hermes programmatic integration](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration)
 - [ODSH-Bridge OpenClaw pairing reference](https://github.com/Mikoribbit/odsh-bridge)
+- [OpenClaw Gateway handshake](https://docs.openclaw.ai/gateway/protocol/handshake)
+- [Real E2E infrastructure](E2E.md)
 - [SSH setup guide](SSH.md)

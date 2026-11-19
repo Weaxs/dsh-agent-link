@@ -1,0 +1,30 @@
+services:
+  hermes-ssh:
+    image: linuxserver/openssh-server:latest
+    network_mode: service:hermes
+    depends_on:
+      hermes:
+        condition: service_healthy
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      USER_NAME: agent
+      PASSWORD_ACCESS: "false"
+      PUBLIC_KEY: ${E2E_SSH_PUBLIC_KEY}
+    ports:
+      - "22022:2222"
+
+  openclaw-ssh:
+    image: linuxserver/openssh-server:latest
+    network_mode: service:openclaw
+    depends_on:
+      openclaw:
+        condition: service_healthy
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      USER_NAME: agent
+      PASSWORD_ACCESS: "false"
+      PUBLIC_KEY: ${E2E_SSH_PUBLIC_KEY}
+    ports:
+      - "22023:2222"

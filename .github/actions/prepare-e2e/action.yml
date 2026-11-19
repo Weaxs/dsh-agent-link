@@ -1,0 +1,16 @@
+name: Prepare real E2E environment
+description: Check out and build the plugin, then generate OpenClaw's model configuration without printing credentials.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: npm
+    - run: npm ci
+      shell: bash
+    - run: npm run build
+      shell: bash
+    - run: node e2e/scripts/write-config.mjs
+      shell: bash

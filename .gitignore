@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .tmp/
+e2e/generated/
 *.tgz
 .DS_Store
 .env

@@ -1,0 +1,131 @@
+name: Real E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "e2e/**"
+      - ".github/workflows/e2e.yml"
+      - ".github/actions/prepare-e2e/**"
+      - "package.json"
+      - "package-lock.json"
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME }}
+  HERMES_API_KEY: e2e-hermes-gateway-token
+  OPENCLAW_GATEWAY_TOKEN: e2e-openclaw-gateway-token
+
+jobs:
+  preflight:
+    name: Check E2E credentials
+    runs-on: ubuntu-latest
+    outputs:
+      model_configured: ${{ steps.check.outputs.model_configured }}
+      tailscale_configured: ${{ steps.check.outputs.tailscale_configured }}
+    steps:
+      - id: check
+        shell: bash
+        run: |
+          model=false
+          tailscale=false
+          if [[ -n "$OPENAI_BASE_URL" && -n "$OPENAI_API_KEY" && -n "$OPENAI_MODEL_NAME" ]]; then model=true; fi
+          if [[ "$model" == true && -n "${{ secrets.TAILSCALE_AUTHKEY }}" ]]; then tailscale=true; fi
+          echo "model_configured=$model" >> "$GITHUB_OUTPUT"
+          echo "tailscale_configured=$tailscale" >> "$GITHUB_OUTPUT"
+          if [[ "$model" != true ]]; then
+            message="Model E2E credentials are not configured (OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL_NAME)."
+            if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message Real E2E jobs will be skipped."; fi
+          fi
+          if [[ "$model" == true && "$tailscale" != true ]]; then
+            message="TAILSCALE_AUTHKEY is not configured; the Tailscale job will be skipped."
+            if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message"; fi
+          fi
+
+  local:
+    name: Local / Hermes and OpenClaw
+    needs: preflight
+    if: needs.preflight.outputs.model_configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/prepare-e2e
+      - name: Run real local E2E
+        run: bash e2e/scripts/run-compose.sh local
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-local-logs
+          path: e2e/generated/e2e-local.log
+
+  ssh:
+    name: SSH / Hermes and OpenClaw
+    needs: preflight
+    if: needs.preflight.outputs.model_configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/prepare-e2e
+      - name: Run real SSH E2E
+        run: bash e2e/scripts/run-compose.sh ssh
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ssh-logs
+          path: e2e/generated/e2e-ssh.log
+
+  tailscale:
+    name: Tailscale / Hermes and OpenClaw
+    needs: preflight
+    if: needs.preflight.outputs.tailscale_configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/prepare-e2e
+      - name: Join the test tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Run real Tailscale E2E
+        run: bash e2e/scripts/run-compose.sh tailscale
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-tailscale-logs
+          path: e2e/generated/e2e-tailscale.log
+
+  headscale:
+    name: Headscale / Hermes and OpenClaw
+    needs: preflight
+    if: needs.preflight.outputs.model_configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/prepare-e2e
+      - name: Run real self-hosted Headscale E2E
+        run: bash e2e/scripts/run-compose.sh headscale
+      - name: Upload Headscale logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-headscale-logs
+          path: |
+            e2e/generated/e2e-headscale.log
+            /tmp/headscale-e2e.log

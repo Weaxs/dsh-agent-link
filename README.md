@@ -70,7 +70,7 @@ Add agents to the `agent-link` row in the profile's `cordis.patch.yml`:
 
 ```yaml
 - id: agent-link
-  name: '@weaxs/dsh-agent-link'
+  name: "@weaxs/dsh-agent-link"
   config:
     agents:
       - id: hermes-gpu
@@ -99,15 +99,15 @@ The doctor checks SSH configuration, non-interactive login, gateway reachability
 
 ## Model tools
 
-| Tool | Purpose |
-|---|---|
-| `agent_list` | List configured agents and optionally probe their health. |
-| `agent_ask` | Start a task and return a local `jobId`. Use `wait: true` for a synchronous call. |
-| `agent_continue` | Send another message to the same remote session. |
-| `agent_status` | Read streamed output, state, errors, and pending approvals. |
-| `agent_cancel` | Cancel a running remote task. |
-| `agent_respond` | Answer an approval using one of its offered choices. |
-| `agent_link_doctor` | Diagnose transport, SSH, gateway, and protocol failures. |
+| Tool                | Purpose                                                                           |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `agent_list`        | List configured agents and optionally probe their health.                         |
+| `agent_ask`         | Start a task and return a local `jobId`. Use `wait: true` for a synchronous call. |
+| `agent_continue`    | Send another message to the same remote session.                                  |
+| `agent_status`      | Read streamed output, state, errors, and pending approvals.                       |
+| `agent_cancel`      | Cancel a running remote task.                                                     |
+| `agent_respond`     | Answer an approval using one of its offered choices.                              |
+| `agent_link_doctor` | Diagnose transport, SSH, gateway, and protocol failures.                          |
 
 Long tasks run in the background. When the originating dsh Agent supports `followup`, the plugin posts a completion notification back to that session.
 
@@ -125,7 +125,7 @@ Enable MCP and name every session that may be read. An empty list shares nothing
 
 ```yaml
 - id: agent-link
-  name: '@weaxs/dsh-agent-link'
+  name: "@weaxs/dsh-agent-link"
   config:
     mcp:
       enabled: true
@@ -162,11 +162,11 @@ The SSH reverse-forward setup and Tailscale alternative are described in [docs/D
 
 ## Transports
 
-| Transport | Best for | Notes |
-|---|---|---|
-| `ssh` (default) | Existing SSH hosts | Uses `ssh -W` with `BatchMode=yes`; no password prompts or custom SSH cryptography. |
-| `direct` | Tailscale, Headscale, LAN, or another trusted network | Uses the configured host and port; set `tls: true` for HTTPS/WSS. |
-| `local` | Hermes or OpenClaw on the same machine | Defaults to `127.0.0.1`. |
+| Transport       | Best for                                              | Notes                                                                               |
+| --------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `ssh` (default) | Existing SSH hosts                                    | Uses `ssh -W` with `BatchMode=yes`; no password prompts or custom SSH cryptography. |
+| `direct`        | Tailscale, Headscale, LAN, or another trusted network | Uses the configured host and port; set `tls: true` for HTTPS/WSS.                   |
+| `local`         | Hermes or OpenClaw on the same machine                | Defaults to `127.0.0.1`.                                                            |
 
 ## Development
 
@@ -178,7 +178,7 @@ npm run build
 npm run check
 ```
 
-See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN.md) for the protocol architecture.
+See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN.md) for the protocol architecture. Real model-backed E2E jobs for SSH, Tailscale, local, and Headscale are documented in [docs/E2E.md](docs/E2E.md).
 
 ## Release
 

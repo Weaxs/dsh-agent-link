@@ -1,0 +1,61 @@
+x-openai-environment: &openai-environment
+  OPENAI_BASE_URL: ${E2E_CONTAINER_OPENAI_BASE_URL}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    command: gateway run
+    environment:
+      <<: *openai-environment
+      HERMES_MODEL: ${OPENAI_MODEL_NAME}
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_PORT: "8642"
+      API_SERVER_KEY: ${HERMES_API_KEY}
+      API_SERVER_MODEL_NAME: ${OPENAI_MODEL_NAME}
+      TERMINAL_ENV: local
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/hermes/.venv/bin/python",
+          "-c",
+          "import socket; s=socket.create_connection(('127.0.0.1',8642),2); s.close()",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  openclaw:
+    image: openclaw/openclaw:latest
+    environment:
+      OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - ./generated/openclaw.json:/etc/openclaw/openclaw.json:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const s=require('net').connect(18789,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  openclaw-approver:
+    image: openclaw/openclaw:latest
+    network_mode: service:openclaw
+    depends_on:
+      openclaw:
+        condition: service_healthy
+    environment:
+      OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+    volumes:
+      - ./scripts/approve-openclaw.mjs:/e2e/approve-openclaw.mjs:ro
+    command: ["node", "/e2e/approve-openclaw.mjs"]

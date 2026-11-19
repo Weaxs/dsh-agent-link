@@ -19,29 +19,52 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "docs"
+    "docs",
+    "e2e",
+    "!e2e/generated"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "test": "vitest run --coverage",
-    "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run",
+    "test:e2e": "node e2e/run.mjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm pack --dry-run",
     "release": "node scripts/sync-version.mjs"
   },
   "engines": {
     "node": ">=22.13.0",
     "dsh": ">=0.2.2-rc.1 <0.3.0-0"
   },
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "hermes", "openclaw", "multi-agent", "tailscale", "ssh"],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "hermes",
+    "openclaw",
+    "multi-agent",
+    "tailscale",
+    "ssh"
+  ],
   "homepage": "https://github.com/Weaxs/dsh-agent-link#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/Weaxs/dsh-agent-link.git" },
-  "bugs": { "url": "https://github.com/Weaxs/dsh-agent-link/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Weaxs/dsh-agent-link.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Weaxs/dsh-agent-link/issues"
+  },
   "author": "Weaxs",
   "license": "MIT",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "dependencies": {
     "ws": "^8.18.3"
@@ -51,6 +74,7 @@
     "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0-0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
     "@deepseek-ai/cordis": "4.1.0",
     "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
     "@types/node": "^24.10.1",

@@ -73,14 +73,14 @@ The API server or gateway must also be listening on its expected loopback port.
 
 These are common defaults, not guarantees. Confirm the username and connection method in the provider's console.
 
-| Provider | Common default user | Key material | Alternative login path |
-|---|---|---|---|
-| Alibaba Cloud ECS | `root`; newer images may use `ecs-user` | Downloaded `.pem` key pair | Workbench is browser-only and cannot be used by this plugin |
-| Tencent Cloud CVM / Lighthouse | `ubuntu` for Ubuntu images; often `root` otherwise | Downloaded `.pem` key pair | OrcaTerm is browser-only |
-| Huawei Cloud ECS | `root` | `.pem` key pair | CloudShell is browser-only |
-| AWS EC2 | `ec2-user` (Amazon Linux), `ubuntu` (Ubuntu), `admin` (Debian) | `.pem` key pair | SSM Session Manager, below |
-| Google Cloud | Determined by `gcloud` or OS Login | Usually `~/.ssh/google_compute_engine` | `gcloud compute config-ssh`, IAP, below |
-| Azure | Chosen at VM creation; often `azureuser` | Generated `.pem` key pair | `az ssh config` / Entra ID, below |
+| Provider                       | Common default user                                            | Key material                           | Alternative login path                                      |
+| ------------------------------ | -------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------- |
+| Alibaba Cloud ECS              | `root`; newer images may use `ecs-user`                        | Downloaded `.pem` key pair             | Workbench is browser-only and cannot be used by this plugin |
+| Tencent Cloud CVM / Lighthouse | `ubuntu` for Ubuntu images; often `root` otherwise             | Downloaded `.pem` key pair             | OrcaTerm is browser-only                                    |
+| Huawei Cloud ECS               | `root`                                                         | `.pem` key pair                        | CloudShell is browser-only                                  |
+| AWS EC2                        | `ec2-user` (Amazon Linux), `ubuntu` (Ubuntu), `admin` (Debian) | `.pem` key pair                        | SSM Session Manager, below                                  |
+| Google Cloud                   | Determined by `gcloud` or OS Login                             | Usually `~/.ssh/google_compute_engine` | `gcloud compute config-ssh`, IAP, below                     |
+| Azure                          | Chosen at VM creation; often `azureuser`                       | Generated `.pem` key pair              | `az ssh config` / Entra ID, below                           |
 
 Browser-based shells cannot be reused by the plugin. Configure key-based OpenSSH or one of the following ProxyCommand integrations.
 
@@ -139,21 +139,21 @@ Host inner-box
 
 `agent_link_doctor` recognizes these failures and returns a targeted hint.
 
-| Error | Likely cause | Fix |
-|---|---|---|
-| `Permission denied (publickey)` | Wrong user or key, or the public key is not authorized | Check `User`, `IdentityFile`, and the server's `authorized_keys`. |
-| `Too many authentication failures` | ssh-agent offers too many keys | Set `IdentitiesOnly yes` and one `IdentityFile` for this host. |
-| `UNPROTECTED PRIVATE KEY FILE` | Private-key permissions are too broad | Run `chmod 600 <key>`. |
-| `Load key ...: invalid format` | The key is a PuTTY `.ppk` file | Run `puttygen key.ppk -O private-openssh -o key.pem`. |
-| `no matching host key type found. Their offer: ssh-rsa` | An old server offers only SHA-1 RSA host keys | For this host only, add `HostKeyAlgorithms +ssh-rsa` and `PubkeyAcceptedAlgorithms +ssh-rsa`; upgrade the server when possible. |
-| `no matching key exchange method found` | The server offers only old key-exchange algorithms | For this host only, add the offered `KexAlgorithms`; plan a server upgrade. |
-| `Host key verification failed` | The host has not been trusted yet | Connect manually once and verify its fingerprint. |
-| `REMOTE HOST IDENTIFICATION HAS CHANGED` | The host was rebuilt or its key changed; it could also be an attack | Verify the cause first, then remove the old entry with `ssh-keygen -R <host>`. |
-| `Could not resolve hostname` | Incorrect alias, hostname, or DNS | Check `~/.ssh/config`. |
-| `Connection timed out` | Security group, firewall, address, or routing problem | Allow your source IP to reach TCP 22; do not open it to `0.0.0.0/0`. |
-| `Connection refused` | sshd is stopped or uses another port | Check sshd and set `Port` explicitly. |
-| `Enter passphrase for key` followed by failure | The key needs a passphrase unavailable in background mode | Add the key to ssh-agent or the macOS keychain. |
-| Login works but `hermes` or `openclaw` is missing | Non-login PATH differs from the interactive PATH | Use a login shell or configure the absolute executable path on the server. |
+| Error                                                   | Likely cause                                                        | Fix                                                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Permission denied (publickey)`                         | Wrong user or key, or the public key is not authorized              | Check `User`, `IdentityFile`, and the server's `authorized_keys`.                                                               |
+| `Too many authentication failures`                      | ssh-agent offers too many keys                                      | Set `IdentitiesOnly yes` and one `IdentityFile` for this host.                                                                  |
+| `UNPROTECTED PRIVATE KEY FILE`                          | Private-key permissions are too broad                               | Run `chmod 600 <key>`.                                                                                                          |
+| `Load key ...: invalid format`                          | The key is a PuTTY `.ppk` file                                      | Run `puttygen key.ppk -O private-openssh -o key.pem`.                                                                           |
+| `no matching host key type found. Their offer: ssh-rsa` | An old server offers only SHA-1 RSA host keys                       | For this host only, add `HostKeyAlgorithms +ssh-rsa` and `PubkeyAcceptedAlgorithms +ssh-rsa`; upgrade the server when possible. |
+| `no matching key exchange method found`                 | The server offers only old key-exchange algorithms                  | For this host only, add the offered `KexAlgorithms`; plan a server upgrade.                                                     |
+| `Host key verification failed`                          | The host has not been trusted yet                                   | Connect manually once and verify its fingerprint.                                                                               |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED`                | The host was rebuilt or its key changed; it could also be an attack | Verify the cause first, then remove the old entry with `ssh-keygen -R <host>`.                                                  |
+| `Could not resolve hostname`                            | Incorrect alias, hostname, or DNS                                   | Check `~/.ssh/config`.                                                                                                          |
+| `Connection timed out`                                  | Security group, firewall, address, or routing problem               | Allow your source IP to reach TCP 22; do not open it to `0.0.0.0/0`.                                                            |
+| `Connection refused`                                    | sshd is stopped or uses another port                                | Check sshd and set `Port` explicitly.                                                                                           |
+| `Enter passphrase for key` followed by failure          | The key needs a passphrase unavailable in background mode           | Add the key to ssh-agent or the macOS keychain.                                                                                 |
+| Login works but `hermes` or `openclaw` is missing       | Non-login PATH differs from the interactive PATH                    | Use a login shell or configure the absolute executable path on the server.                                                      |
 
 Never weaken algorithms globally under `Host *` to accommodate one old server.
 

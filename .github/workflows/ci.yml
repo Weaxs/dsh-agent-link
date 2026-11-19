@@ -18,4 +18,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run check
+      - name: Biome
+        run: npm run lint
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Unit and protocol tests
+        run: npm test
+      - name: Build and package check
+        run: npm run build && npm pack --dry-run

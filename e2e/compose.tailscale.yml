@@ -1,0 +1,43 @@
+x-tailscale-environment: &tailscale-environment
+  TS_AUTHKEY: ${TAILSCALE_AUTHKEY}
+  TS_STATE_DIR: /var/lib/tailscale
+  TS_USERSPACE: "false"
+  TS_ACCEPT_DNS: "true"
+
+x-tailscale-service: &tailscale-service
+  image: tailscale/tailscale:latest
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  hermes-tailscale:
+    <<: *tailscale-service
+    network_mode: service:hermes
+    depends_on:
+      hermes:
+        condition: service_healthy
+    environment:
+      <<: *tailscale-environment
+      TS_HOSTNAME: hermes-e2e
+    volumes:
+      - hermes-tailscale-state:/var/lib/tailscale
+
+  openclaw-tailscale:
+    <<: *tailscale-service
+    network_mode: service:openclaw
+    depends_on:
+      openclaw:
+        condition: service_healthy
+    environment:
+      <<: *tailscale-environment
+      TS_HOSTNAME: openclaw-e2e
+    volumes:
+      - openclaw-tailscale-state:/var/lib/tailscale
+
+volumes:
+  hermes-tailscale-state:
+  openclaw-tailscale-state:
