@@ -95,3 +95,39 @@ services:
       interval: 3s
       timeout: 3s
       retries: 80
+
+  acp:
+    build:
+      context: ../..
+      dockerfile: .github/e2e/acp/Dockerfile
+    profiles: [acp]
+    network_mode: service:${E2E_TARGET}
+    depends_on:
+      - ${E2E_TARGET}
+    init: true
+    environment:
+      AGENT_LINK_NATIVE_KIND: ${E2E_TARGET}
+      AGENT_LINK_NATIVE_HOST: 127.0.0.1
+      AGENT_LINK_NATIVE_PORT: ${E2E_NATIVE_PORT}
+      AGENT_LINK_NATIVE_TOKEN: ${E2E_NATIVE_TOKEN}
+      AGENT_LINK_NATIVE_CWD: /tmp
+      AGENT_LINK_DSH_PROVIDER: openai
+      AGENT_LINK_OPENCLAW_AGENT_ID: main
+      AGENT_LINK_REASONING_EFFORT: low
+      AGENT_LINK_ACP_HOST: 0.0.0.0
+      AGENT_LINK_ACP_PORT: 18792
+      AGENT_LINK_ACP_TOKEN: e2e-acp-token
+      OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME}
+    volumes:
+      - ./generated/dsh:/tmp/dsh-e2e
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:18792/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60

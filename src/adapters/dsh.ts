@@ -93,8 +93,9 @@ export class DshAdapter implements AgentAdapter {
         for (const record of records) {
           const text = assistantText(record);
           if (text && text !== output) {
+            const delta = text.startsWith(output) ? text.slice(output.length) : text;
             output = text;
-            yield { type: 'text', text };
+            if (delta) yield { type: 'text', text: delta };
           }
         }
         const cursor = Number(waited.state?.cursor ?? afterSeq);

@@ -1,0 +1,284 @@
+import { randomUUID } from 'node:crypto';
+import {
+  type ActiveSession,
+  type ActiveSessionMessage,
+  type AgentCapabilities,
+  type ClientConnection,
+  client,
+  methods,
+  PROTOCOL_VERSION,
+  type RequestPermissionResponse,
+  type SessionUpdate,
+} from '@agentclientprotocol/sdk';
+import { createWebSocketStream, type WebSocketConstructor } from '@agentclientprotocol/sdk/experimental/ws-client';
+import WebSocket from 'ws';
+import { AsyncQueue } from '../async-queue.js';
+import { secret } from '../config.js';
+import { transportFor } from '../transports/http.js';
+import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
+
+interface PendingPermission {
+  resolve: (response: RequestPermissionResponse) => void;
+}
+
+type PromptMessage = { kind: 'acp'; value: ActiveSessionMessage } | { kind: 'native'; value: AgentEvent };
+
+export class AcpAdapter implements AgentAdapter {
+  readonly kind = 'acp' as const;
+  private readonly transport: Transport;
+  private readonly queues = new Map<string, AsyncQueue<PromptMessage>>();
+  private readonly activeSessions = new Map<string, ActiveSession>();
+  private readonly sessionIds = new Map<string, string>();
+  private readonly permissions = new Map<string, PendingPermission>();
+  private connection?: ClientConnection;
+  private connecting?: Promise<void>;
+  private capabilities?: AgentCapabilities;
+
+  constructor(
+    readonly id: string,
+    private readonly config: AgentConfig,
+    transport?: Transport,
+  ) {
+    this.transport = transport ?? transportFor(config);
+  }
+
+  async health(signal?: AbortSignal): Promise<Record<string, unknown>> {
+    await this.connect(signal);
+    return { ok: true, protocol: 'acp', protocolVersion: PROTOCOL_VERSION, capabilities: this.capabilities };
+  }
+
+  async listSessions(signal?: AbortSignal): Promise<AgentSession[]> {
+    await this.connect(signal);
+    if (!this.capabilities?.sessionCapabilities?.list) return [];
+    const result = await this.connection!.agent.request(
+      methods.agent.session.list,
+      {},
+      {
+        cancellationSignal: signal,
+        stopWaitingOnCancel: true,
+      },
+    );
+    return result.sessions.map((session) => ({
+      id: session.sessionId,
+      title: session.title ?? undefined,
+      updatedAt: session.updatedAt ?? undefined,
+    }));
+  }
+
+  async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+    const alias = sessionId ?? randomUUID();
+    let actualId = alias;
+    const queue = new AsyncQueue<PromptMessage>();
+    try {
+      await this.connect(signal);
+      let active = this.activeSessions.get(alias);
+      if (!active) {
+        active = await this.connection!.agent.buildSession({ cwd: this.config.dshCwd ?? '/', mcpServers: [] }).start({
+          cancellationSignal: signal,
+          stopWaitingOnCancel: true,
+        });
+        actualId = active.sessionId;
+        this.activeSessions.set(alias, active);
+        this.activeSessions.set(actualId, active);
+        this.sessionIds.set(alias, actualId);
+        this.sessionIds.set(actualId, actualId);
+      } else {
+        actualId = active.sessionId;
+      }
+      this.queues.set(actualId, queue);
+      const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
+      completion.catch((error) => {
+        queue.push({
+          kind: 'native',
+          value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+        });
+      });
+      void (async () => {
+        try {
+          while (true) {
+            const value = await active.nextUpdate();
+            queue.push({ kind: 'acp', value });
+            if (value.kind === 'stop') break;
+          }
+        } catch (error) {
+          queue.push({
+            kind: 'native',
+            value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+          });
+        }
+      })();
+      let output = '';
+      while (true) {
+        const next = await queue.next();
+        if (next.done) throw new Error('ACP event stream ended before the prompt completed');
+        if (next.value.kind === 'acp') {
+          if (next.value.value.kind === 'stop') {
+            yield { type: 'final', text: output, stopReason: next.value.value.stopReason };
+            return;
+          }
+          const event = acpEvent(next.value.value.update);
+          if (!event) continue;
+          if (event.type === 'text' && event.text) output += event.text;
+          yield event;
+        } else {
+          const event = next.value.value;
+          if (event.type === 'error') throw new Error(event.text ?? 'ACP agent failed');
+          if (event.type === 'text' && event.text) output += event.text;
+          yield event;
+        }
+      }
+    } catch (error) {
+      if (signal?.aborted) {
+        await this.cancel(actualId).catch(() => {});
+        yield { type: 'final', text: '', stopReason: 'cancelled' };
+      } else {
+        yield { type: 'error', text: error instanceof Error ? error.message : String(error) };
+      }
+    } finally {
+      this.queues.delete(actualId);
+      queue.finish();
+    }
+  }
+
+  async cancel(sessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.connect(signal);
+    const actualId = this.sessionIds.get(sessionId) ?? sessionId;
+    await this.connection!.agent.notify(methods.agent.session.cancel, { sessionId: actualId });
+    for (const [requestId, pending] of this.permissions) {
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+      this.permissions.delete(requestId);
+    }
+  }
+
+  async respond(sessionId: string, requestId: string, choice: string): Promise<void> {
+    void sessionId;
+    const pending = this.permissions.get(requestId);
+    if (!pending) throw new Error(`No pending ACP permission request ${requestId}`);
+    this.permissions.delete(requestId);
+    pending.resolve({ outcome: { outcome: 'selected', optionId: choice } });
+  }
+
+  async close(): Promise<void> {
+    for (const [requestId, pending] of this.permissions) {
+      pending.resolve({ outcome: { outcome: 'cancelled' } });
+      this.permissions.delete(requestId);
+    }
+    for (const queue of this.queues.values()) queue.finish();
+    this.queues.clear();
+    for (const session of new Set(this.activeSessions.values())) session.dispose();
+    this.activeSessions.clear();
+    this.connection?.close();
+    this.connection = undefined;
+    this.connecting = undefined;
+    await this.transport.close();
+  }
+
+  private async connect(signal?: AbortSignal): Promise<void> {
+    if (this.connection && !this.connection.signal.aborted) return;
+    if (this.connecting) return this.connecting;
+    this.connecting = this.open(signal)
+      .catch((error) => {
+        this.connection?.close();
+        this.connection = undefined;
+        throw error;
+      })
+      .finally(() => {
+        this.connecting = undefined;
+      });
+    return this.connecting;
+  }
+
+  private async open(signal?: AbortSignal): Promise<void> {
+    const host = this.transport.kind === 'ssh' ? '127.0.0.1' : (this.config.host ?? '127.0.0.1');
+    const protocol = this.transport.kind !== 'ssh' && this.config.tls ? 'wss' : 'ws';
+    const token = secret(this.config);
+    const stream = createWebSocketStream(`${protocol}://${host}:${this.config.port ?? 18_792}/acp`, {
+      WebSocket: acpWebSocketConstructor(this.transport),
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    });
+    const app = client({ name: 'dsh-agent-link' });
+    app.onRequest(methods.client.session.requestPermission, ({ params }) => {
+      const requestId = params.toolCall.toolCallId;
+      this.queues.get(params.sessionId)?.push({
+        kind: 'native',
+        value: {
+          type: 'approval',
+          requestId,
+          text: params.toolCall.title ?? 'Permission requested',
+          choices: params.options.map((option) => option.optionId),
+        },
+      });
+      return new Promise<RequestPermissionResponse>((resolve) => {
+        this.permissions.set(requestId, { resolve });
+      });
+    });
+    const connection = app.connect(stream);
+    this.connection = connection;
+    connection.closed.then(() => {
+      for (const queue of this.queues.values()) queue.fail(new Error('ACP connection closed'));
+      for (const [requestId, pending] of this.permissions) {
+        pending.resolve({ outcome: { outcome: 'cancelled' } });
+        this.permissions.delete(requestId);
+      }
+    });
+    const initialized = await withTimeout(
+      connection.agent.request(methods.agent.initialize, {
+        protocolVersion: PROTOCOL_VERSION,
+        clientInfo: { name: 'dsh-agent-link', version: '0.1.0' },
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      }),
+      this.config.connectTimeoutMs ?? 30_000,
+      'ACP initialize',
+      signal,
+    );
+    this.capabilities = initialized.agentCapabilities;
+  }
+}
+
+function acpEvent(update: SessionUpdate): AgentEvent | undefined {
+  if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+    return { type: 'text', text: update.content.text };
+  }
+  if (update.sessionUpdate === 'tool_call') {
+    return {
+      type: 'tool',
+      phase: 'start',
+      requestId: update.toolCallId,
+      name: update.name ?? update.title,
+    };
+  }
+  if (update.sessionUpdate === 'tool_call_update') {
+    return {
+      type: 'tool',
+      phase: update.status === 'completed' || update.status === 'failed' ? 'end' : 'start',
+      requestId: update.toolCallId,
+      name: update.name ?? update.title ?? update.toolCallId,
+    };
+  }
+  if (update.sessionUpdate === 'notice' && update.severity === 'error') {
+    return { type: 'error', text: update.description ?? update.title };
+  }
+  return undefined;
+}
+
+function acpWebSocketConstructor(transport: Transport): WebSocketConstructor {
+  if (transport.kind !== 'ssh') return WebSocket;
+  return class AcpWebSocket extends WebSocket {
+    constructor(url: string, protocols?: string | string[], options?: { headers?: Record<string, string> }) {
+      super(url, protocols, { ...options, createConnection: () => transport.socket!() });
+    }
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?: AbortSignal): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const abort = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    signal?.addEventListener('abort', () => reject(new Error(`${label} aborted`)), { once: true });
+  });
+  try {
+    return await Promise.race([promise, abort]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

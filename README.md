@@ -1,13 +1,13 @@
 # dsh-agent-link
 
-Connect **DeepSeek Harness (dsh)** with **Hermes**, **OpenClaw**, and remote **dsh** instances through their native gateway interfaces. No hosted relay, no cloud broker, and no Mesh plugin on remote hosts.
+Connect **DeepSeek Harness (dsh)** with **Hermes**, **OpenClaw**, and remote **dsh** instances through the unified **Agent Client Protocol (ACP v1)** or their native gateway interfaces. No hosted relay, no cloud broker, and no Mesh plugin on remote hosts.
 
 - **dsh → remote agents:** start tasks, continue remote sessions, receive streamed output, answer approvals, and cancel runs.
 - **Remote agents → dsh:** expose explicitly allow-listed local dsh sessions through a read-only MCP endpoint.
 - **Three transports:** system OpenSSH by default, direct connections with a Tailscale preset, and local loopback.
-- **One installation:** only dsh installs this plugin. Remote agents keep their native gateway, credentials, tools, and sessions.
+- **One ACP provider:** connect any ACP-compatible endpoint with `kind: acp`; an optional bridge reuses the native drivers behind one protocol.
 
-> Status: early development. Hermes uses the API Server (`/v1/runs` and SSE). OpenClaw uses the Gateway WebSocket pairing protocol. Remote dsh uses the native `/api/session/*` RPC API. Always run `agent_link_doctor` after configuring a host.
+> Status: early development. ACP uses the official TypeScript SDK and stable v1 methods. Native compatibility remains available: Hermes uses the API Server (`/v1/runs` and SSE), OpenClaw uses the Gateway WebSocket pairing protocol, and remote dsh uses `/api/session/*` RPC. Always run `agent_link_doctor` after configuring a host.
 
 ## Packages
 
@@ -74,7 +74,34 @@ export DSH_GATEWAY_TOKEN='the-token-from-the-remote-dsh-web-url'
 
 The adapter exchanges that token through `/connect`, then uses `session/create`, `session/selectModel`, `session/prompt`, `session/wait`, and `session/cancel`. `model` and `dshProvider` are optional; omit them to use the remote instance's existing model selection.
 
-### 4. Add the dsh configuration
+### 4. Optional: unify endpoints through ACP
+
+An ACP-compatible harness needs no bridge. Point one `acp` agent at its WebSocket endpoint, usually `/acp`, and set `AGENT_LINK_ACP_TOKEN` when the endpoint requires bearer authentication.
+
+For Hermes, OpenClaw, or remote dsh without a native ACP endpoint, start the bridge on that host. It connects to the existing loopback gateway and exposes the same ACP v1 methods for every target:
+
+```bash
+export AGENT_LINK_NATIVE_KIND=hermes
+export AGENT_LINK_NATIVE_TOKEN='your-native-gateway-token'
+export AGENT_LINK_ACP_TOKEN='a-long-random-acp-token'
+dsh-agent-link-acp
+```
+
+The native port defaults to `8642`, `18789`, or `18790` according to `AGENT_LINK_NATIVE_KIND`. Override it with `AGENT_LINK_NATIVE_PORT`. The ACP listener defaults to `127.0.0.1:18792`; set `AGENT_LINK_ACP_HOST` and `AGENT_LINK_ACP_PORT` for a private-network listener. Non-loopback listeners require `AGENT_LINK_ACP_TOKEN`. DSH bridges read `DSH_GATEWAY_TOKEN` when `AGENT_LINK_NATIVE_TOKEN` is omitted.
+
+Use the same ACP configuration for a native ACP endpoint or a bridge:
+
+```yaml
+- id: unified-agent
+  kind: acp
+  transport: ssh
+  ssh: gpu-box
+  port: 18792
+```
+
+The ACP provider supports `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission`. Continuations reuse the ACP session ID instead of creating a new session.
+
+### 5. Add the dsh configuration
 
 Add agents to the `agent-link` row in the profile's `cordis.patch.yml`:
 
@@ -104,7 +131,7 @@ Add agents to the `agent-link` row in the profile's `cordis.patch.yml`:
 
 SSH is the default when `transport` is omitted. `gpu-box` is an alias from `~/.ssh/config`, not a command line. Read [the SSH guide](docs/SSH.md) before the first connection.
 
-### 5. Check the connection
+### 6. Check the connection
 
 Ask dsh:
 

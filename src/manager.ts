@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { DshAdapter } from './adapters/dsh.js';
-import { HermesAdapter } from './adapters/hermes.js';
-import { OpenClawAdapter } from './adapters/openclaw.js';
+import { AcpAdapter } from './adapters/acp.js';
+import { createNativeAdapter, createNativeSessionId } from './adapters/native.js';
 import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.js';
 
 export type AdapterFactory = (config: AgentConfig) => AgentAdapter;
@@ -33,13 +32,7 @@ export class AgentManager {
   start(agentId: string, text: string, sessionId: string | undefined, onDone?: (job: AgentJob) => void): AgentJob {
     const adapter = this.adapter(agentId);
     const config = this.configs.find((item) => item.id === agentId)!;
-    const remoteSession =
-      sessionId ??
-      (adapter.kind === 'hermes'
-        ? `dsh_${randomUUID()}`
-        : adapter.kind === 'dsh'
-          ? randomUUID()
-          : `agent:${config.openclawAgentId ?? 'main'}:dsh-agent-link:${randomUUID()}`);
+    const remoteSession = sessionId ?? (adapter.kind === 'acp' ? randomUUID() : createNativeSessionId(config));
     const id = randomUUID();
     const job: AgentJob = {
       id,
@@ -138,11 +131,7 @@ export class AgentManager {
 }
 
 function defaultFactory(config: AgentConfig): AgentAdapter {
-  return config.kind === 'hermes'
-    ? new HermesAdapter(config.id, config)
-    : config.kind === 'openclaw'
-      ? new OpenClawAdapter(config.id, config)
-      : new DshAdapter(config.id, config);
+  return config.kind === 'acp' ? new AcpAdapter(config.id, config) : createNativeAdapter(config);
 }
 
 export function fromConfig(config: PluginConfig): AgentManager {

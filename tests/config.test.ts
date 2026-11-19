@@ -11,12 +11,14 @@ describe('configuration and policy', () => {
         { id: 'hermes', kind: 'hermes', ssh: 'gpu' },
         { id: 'claw', kind: 'openclaw', ssh: 'claw' },
         { id: 'remote-dsh', kind: 'dsh', ssh: 'dsh' },
+        { id: 'acp', kind: 'acp', ssh: 'acp' },
       ],
     });
     expect(value.agents.map((agent) => [agent.transport, agent.port])).toEqual([
       ['ssh', 8642],
       ['ssh', 18789],
       ['ssh', 18790],
+      ['ssh', 18792],
     ]);
   });
 

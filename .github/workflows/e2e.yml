@@ -15,6 +15,12 @@ on:
         default: all
         type: choice
         options: [all, hermes, openclaw, dsh]
+      protocol:
+        description: Client protocol to test
+        required: true
+        default: all
+        type: choice
+        options: [all, native, acp]
   push:
     branches: [main]
     paths:
@@ -77,6 +83,7 @@ jobs:
 
           transport_filter="${{ inputs.transport || 'all' }}"
           target_filter="${{ inputs.target || 'all' }}"
+          protocol_filter="${{ inputs.protocol || 'all' }}"
           has_work=false
           matrix='{"include":['
           for transport in local ssh tailscale headscale; do
@@ -85,15 +92,18 @@ jobs:
             for target in hermes openclaw dsh; do
               if [[ "$target_filter" != all && "$target_filter" != "$target" ]]; then continue; fi
               if [[ "$model" != true ]]; then continue; fi
-              matrix+="{\"transport\":\"$transport\",\"target\":\"$target\"},"
-              has_work=true
+              for protocol in native acp; do
+                if [[ "$protocol_filter" != all && "$protocol_filter" != "$protocol" ]]; then continue; fi
+                matrix+="{\"transport\":\"$transport\",\"target\":\"$target\",\"protocol\":\"$protocol\"},"
+                has_work=true
+              done
             done
           done
           echo "matrix=${matrix%,}]}" >> "$GITHUB_OUTPUT"
           echo "has_work=$has_work" >> "$GITHUB_OUTPUT"
 
   integration:
-    name: ${{ matrix.transport }} / ${{ matrix.target }}
+    name: ${{ matrix.transport }} / ${{ matrix.target }} / ${{ matrix.protocol }}
     needs: preflight
     strategy:
       fail-fast: false
@@ -109,16 +119,17 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-      - name: Run ${{ matrix.transport }} / ${{ matrix.target }}
+      - name: Run ${{ matrix.transport }} / ${{ matrix.target }} / ${{ matrix.protocol }}
         run: bash .github/e2e/scripts/run-compose.sh "${{ matrix.transport }}" "${{ matrix.target }}"
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+          E2E_PROTOCOL: ${{ matrix.protocol }}
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: e2e-${{ matrix.transport }}-${{ matrix.target }}-logs
+          name: e2e-${{ matrix.transport }}-${{ matrix.target }}-${{ matrix.protocol }}-logs
           path: |
-            .github/e2e/generated/e2e-${{ matrix.transport }}-${{ matrix.target }}.log
-            .github/e2e/generated/adapter-${{ matrix.transport }}-${{ matrix.target }}.log
-            .github/e2e/generated/headscale-${{ matrix.target }}-daemon.log
+            .github/e2e/generated/e2e-${{ matrix.transport }}-${{ matrix.target }}-${{ matrix.protocol }}.log
+            .github/e2e/generated/adapter-${{ matrix.transport }}-${{ matrix.target }}-${{ matrix.protocol }}.log
+            .github/e2e/generated/headscale-${{ matrix.target }}-${{ matrix.protocol }}-daemon.log

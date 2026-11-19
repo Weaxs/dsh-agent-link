@@ -4,7 +4,7 @@ The `Transport Integration Tests` workflow starts official Hermes and OpenClaw i
 
 ## Jobs
 
-The matrix reports **12 independent transport/target jobs**: every transport is tested separately with `hermes`, `openclaw`, and `dsh`.
+The matrix reports **24 independent transport/target/protocol jobs**: every transport is tested separately with `hermes`, `openclaw`, and `dsh`, once through the native adapter and once through the unified ACP provider. Native jobs exercise the existing gateway directly. ACP jobs start a bridge in the target's shared network namespace and connect to it with the official ACP v1 WebSocket transport, so the ACP bytes cross the same Local, SSH, Tailscale, or Headscale path.
 
 | Transport   | Actual network path                                                   | Additional infrastructure                                                         |
 | ----------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -71,7 +71,7 @@ This keeps DSH's browser trust boundary intact while exercising the same RPC pat
 
 ## Running the workflow
 
-Run **Transport Integration Tests** manually through `workflow_dispatch`, optionally selecting one transport and one target, or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
+Run **Transport Integration Tests** manually through `workflow_dispatch`, optionally selecting one transport, target, and protocol (`native` or `acp`), or let it run when E2E-related files change on `main` or on its weekly schedule. The normal `CI` workflow separately runs Biome, TypeScript, unit/protocol tests, build, and package checks without model credentials.
 
 To run one transport/target locally with Docker and the same credentials:
 
@@ -80,6 +80,7 @@ export OPENAI_BASE_URL='https://your-endpoint.example/v1'
 export OPENAI_API_KEY='...'
 export OPENAI_MODEL_NAME='your-model'
 bash .github/e2e/scripts/run-compose.sh local dsh
+E2E_PROTOCOL=acp bash .github/e2e/scripts/run-compose.sh local dsh
 ```
 
 For Tailscale mode, also export `TAILSCALE_AUTHKEY` and connect the local machine to the same tailnet first. The Headscale script starts its own control plane and joins the local machine to it. Docker is required for all four modes; installing Hermes, OpenClaw, or DSH on the host is not.

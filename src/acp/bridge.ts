@@ -1,0 +1,217 @@
+import { randomUUID } from 'node:crypto';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import {
+  type AgentApp,
+  type AgentConnection,
+  agent,
+  methods,
+  PROTOCOL_VERSION,
+  type RequestPermissionResponse,
+  type SessionUpdate,
+  type StopReason,
+} from '@agentclientprotocol/sdk';
+import { createNodeWebSocketUpgradeHandler } from '@agentclientprotocol/sdk/experimental/node';
+import { AcpServer } from '@agentclientprotocol/sdk/experimental/server';
+import { WebSocketServer } from 'ws';
+import { createNativeAdapter, createNativeSessionId } from '../adapters/native.js';
+import type { AgentAdapter, AgentConfig } from '../types.js';
+
+export type NativeAdapterFactory = (config: AgentConfig) => AgentAdapter;
+
+export interface AcpBridgeOptions {
+  host?: string;
+  port?: number;
+  token?: string;
+}
+
+export class AcpBridge {
+  private server?: http.Server;
+  private acpServer?: AcpServer;
+  private webSocketServer?: WebSocketServer;
+
+  constructor(
+    private readonly config: AgentConfig,
+    private readonly factory: NativeAdapterFactory = createNativeAdapter,
+  ) {}
+
+  async start(options: AcpBridgeOptions = {}): Promise<{ host: string; port: number }> {
+    const host = options.host ?? '127.0.0.1';
+    const token = options.token ?? process.env.AGENT_LINK_ACP_TOKEN;
+    if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !token) {
+      throw new Error('AGENT_LINK_ACP_TOKEN is required when the ACP bridge is not loopback-only');
+    }
+    const acpServer = new AcpServer({ createAgent: () => createAcpAgent(this.config, this.factory(this.config)) });
+    const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
+    const upgrade = createNodeWebSocketUpgradeHandler(acpServer, webSocketServer);
+    const server = http.createServer((request, response) => {
+      if (request.url === '/health') {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ ok: true, protocol: 'acp', protocolVersion: PROTOCOL_VERSION }));
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.on('upgrade', (request, socket, head) => {
+      const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+      if (path !== '/acp' || (token && request.headers.authorization !== `Bearer ${token}`)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      upgrade(request, socket, head);
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port ?? 18_792, host, () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    this.server = server;
+    this.acpServer = acpServer;
+    this.webSocketServer = webSocketServer;
+    const address = server.address() as AddressInfo;
+    return { host, port: address.port };
+  }
+
+  async close(): Promise<void> {
+    const server = this.server;
+    this.server = undefined;
+    for (const client of this.webSocketServer?.clients ?? []) client.terminate();
+    await this.acpServer?.close();
+    this.acpServer = undefined;
+    this.webSocketServer?.close();
+    this.webSocketServer = undefined;
+    if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): AgentApp {
+  const cancelled = new Set<string>();
+  const sessionCwds = new Map<string, string>();
+  const app = agent({ name: 'dsh-agent-link-acp-bridge' });
+  app.onConnect((connection: AgentConnection) => {
+    void connection.closed.then(() => adapter.close());
+  });
+  app.onRequest(methods.agent.initialize, async ({ signal }) => {
+    await adapter.health(signal);
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      agentInfo: { name: 'dsh-agent-link-acp-bridge', version: '0.1.0' },
+      agentCapabilities: {
+        loadSession: false,
+        promptCapabilities: { image: false, audio: false, embeddedContext: false },
+        sessionCapabilities: { list: {} },
+      },
+    };
+  });
+  app.onRequest(methods.agent.session.new, ({ params }) => {
+    const sessionId = createNativeSessionId(config);
+    sessionCwds.set(sessionId, params.cwd);
+    cancelled.delete(sessionId);
+    return { sessionId };
+  });
+  app.onRequest(methods.agent.session.list, async ({ signal }) => {
+    const sessions = await adapter.listSessions(signal);
+    return {
+      sessions: sessions.map((session) => ({
+        sessionId: session.id,
+        cwd: sessionCwds.get(session.id) ?? config.dshCwd ?? '/',
+        title: session.title,
+        updatedAt: session.updatedAt === undefined ? undefined : new Date(session.updatedAt).toISOString(),
+      })),
+    };
+  });
+  app.onRequest(methods.agent.session.prompt, async ({ params, client, signal }) => {
+    const sessionId = params.sessionId;
+    const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
+    const toolIds = new Map<string, string>();
+    let output = '';
+    let stopReason: StopReason = 'end_turn';
+    const notify = async (update: SessionUpdate) => {
+      await client.notify(methods.client.session.update, { sessionId, update });
+    };
+    for await (const event of adapter.prompt(sessionId, text, signal)) {
+      if (event.type === 'text' && event.text) {
+        output += event.text;
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: event.text } });
+      } else if (event.type === 'tool') {
+        const key = event.requestId ?? event.name ?? 'tool';
+        const toolCallId = toolIds.get(key) ?? event.requestId ?? randomUUID();
+        toolIds.set(key, toolCallId);
+        if (event.phase === 'end') {
+          await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+        } else {
+          await notify({
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            title: event.name ?? 'Tool call',
+            name: event.name,
+            kind: 'other',
+            status: 'in_progress',
+          });
+        }
+      } else if (event.type === 'approval') {
+        const choices = event.choices?.length ? event.choices : ['approve', 'reject'];
+        const toolCallId = event.requestId || randomUUID();
+        const response = (await client.request(
+          methods.client.session.requestPermission,
+          {
+            sessionId,
+            toolCall: {
+              toolCallId,
+              title: event.text ?? 'Permission requested',
+              kind: 'other',
+              status: 'pending',
+            },
+            options: choices.map((choice) => ({
+              optionId: choice,
+              name: choice,
+              kind: /reject|deny|no/i.test(choice) ? ('reject_once' as const) : ('allow_once' as const),
+            })),
+          },
+          { cancellationSignal: signal, stopWaitingOnCancel: true },
+        )) as RequestPermissionResponse;
+        if (response.outcome.outcome !== 'selected') {
+          cancelled.add(sessionId);
+          await adapter.cancel(sessionId, signal);
+          stopReason = 'cancelled';
+          break;
+        }
+        if (!adapter.respond) throw new Error(`${adapter.id} does not support permission responses`);
+        await adapter.respond(sessionId, event.requestId ?? '', response.outcome.optionId, signal);
+      } else if (event.type === 'error') {
+        throw new Error(event.text ?? 'Remote agent failed');
+      } else if (event.type === 'final') {
+        const finalText = event.text ?? '';
+        const remaining = finalText.startsWith(output)
+          ? finalText.slice(output.length)
+          : output.endsWith(finalText)
+            ? ''
+            : finalText;
+        if (remaining) {
+          output += remaining;
+          await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: remaining } });
+        }
+        stopReason = acpStopReason(event.stopReason);
+        break;
+      }
+    }
+    return { stopReason: cancelled.has(sessionId) ? 'cancelled' : stopReason };
+  });
+  app.onNotification(methods.agent.session.cancel, async ({ params, signal }) => {
+    cancelled.add(params.sessionId);
+    await adapter.cancel(params.sessionId, signal);
+  });
+  return app;
+}
+
+function acpStopReason(reason: string | undefined): StopReason {
+  const value = reason?.toLowerCase() ?? '';
+  if (value.includes('cancel')) return 'cancelled';
+  if (value.includes('max') && value.includes('token')) return 'max_tokens';
+  if (value.includes('max') && value.includes('turn')) return 'max_turn_requests';
+  if (value.includes('refusal')) return 'refusal';
+  return 'end_turn';
+}

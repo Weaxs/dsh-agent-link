@@ -8,3 +8,6 @@ services:
   dsh:
     ports:
       - "18790:18790"
+  acp:
+    ports:
+      - "18792:18792"

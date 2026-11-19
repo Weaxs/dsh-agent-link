@@ -26,7 +26,11 @@ export async function apply(ctx: Context, input: PluginConfig = {}): Promise<voi
   });
 }
 
+export { AcpBridge, createAcpAgent } from './acp/bridge.js';
+export { AcpAdapter } from './adapters/acp.js';
+export { DshAdapter } from './adapters/dsh.js';
 export { HermesAdapter } from './adapters/hermes.js';
+export { createNativeAdapter, createNativeSessionId } from './adapters/native.js';
 export { OpenClawAdapter } from './adapters/openclaw.js';
 export { normalizeConfig } from './config.js';
 export { runDoctor, sshHint } from './doctor.js';

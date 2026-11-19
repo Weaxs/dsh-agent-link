@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { AgentManager } from '../../dist/manager.js';
 
 const mode = process.env.E2E_TRANSPORT ?? 'local';
-const label = process.env.E2E_MODE_LABEL ?? mode;
+const protocol = process.env.E2E_PROTOCOL ?? 'native';
+const label = `${process.env.E2E_MODE_LABEL ?? mode}/${protocol}`;
 const timeoutMs = Number(process.env.E2E_TASK_TIMEOUT_MS ?? 180_000);
 
 for (const name of ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL_NAME']) {
@@ -13,6 +14,20 @@ function agentConfig(kind) {
   const upper = kind.toUpperCase();
   const transport = mode;
   const host = process.env[`${upper}_HOST`] ?? '127.0.0.1';
+  if (protocol === 'acp') {
+    return {
+      id: `acp-${kind}-${label}`,
+      kind: 'acp',
+      transport,
+      ...(transport === 'ssh'
+        ? { ssh: process.env[`${upper}_SSH_ALIAS`] ?? `${kind}-e2e`, sshConfig: process.env.E2E_SSH_CONFIG }
+        : { host }),
+      port: 18792,
+      token: 'e2e-acp-token',
+      dshCwd: '/tmp',
+      connectTimeoutMs: 30_000,
+    };
+  }
   return {
     id: `${kind}-${label}`,
     kind,

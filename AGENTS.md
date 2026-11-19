@@ -6,14 +6,15 @@
 
 The architectural boundary is strict:
 
-- `src/adapters/` owns gateway protocols and event normalization.
+- `src/adapters/` owns gateway protocols and event normalization, including the single ACP provider.
 - `src/transports/` owns connectivity and process/socket lifecycles.
 - `src/manager.ts` owns local jobs, output, timeouts, cancellation, and completion notifications.
 - `src/tools.ts` owns the model-facing dsh tool contract.
+- `src/acp/` owns the reusable ACP v1 bridge and CLI; native adapters stay behind its boundary.
 - `src/mcp/` owns the separate read-only MCP listener.
 - `src/policy/` owns redaction and other disclosure controls.
 
-Do not mix these responsibilities. A new remote platform gets a new adapter; a new network path gets a new transport. Do not add transport branches to protocol adapters.
+Do not mix these responsibilities. Prefer the shared ACP provider for compatible platforms; a new native-only platform gets a native adapter behind the bridge, and a new network path gets a new transport. Do not add transport branches to protocol adapters.
 
 ## Invariants
 
@@ -101,7 +102,7 @@ Tests must cover behavior, not only types:
 
 A passing mock test does not prove compatibility with a real Hermes, OpenClaw, or remote DSH deployment. State that distinction in delivery notes and run `agent_link_doctor` against a real host when one is available.
 
-Real model-backed E2E coverage lives in `.github/e2e/` and `.github/workflows/e2e.yml`. The 12-job matrix must start actual Hermes, OpenClaw, or `dsh web` services for each transport/target pair and complete an initial model task plus a same-session continuation. Never replace these with protocol mocks, skip missing credentials silently, or report a health check as an E2E pass. Read [docs/E2E.md](docs/E2E.md) before changing the infrastructure or required secrets.
+Real model-backed E2E coverage lives in `.github/e2e/` and `.github/workflows/e2e.yml`. The 24-job matrix must start actual Hermes, OpenClaw, or `dsh web` services for each transport/target pair and complete an initial model task plus a same-session continuation through both native and ACP paths. Never replace these with protocol mocks, skip missing credentials silently, or report a health check as an E2E pass. Read [docs/E2E.md](docs/E2E.md) before changing the infrastructure or required secrets.
 
 ## Documentation
 

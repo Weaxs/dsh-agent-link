@@ -2,7 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 export type TransportKind = 'ssh' | 'direct' | 'local';
-export type AgentKind = 'hermes' | 'openclaw' | 'dsh';
+export type AgentKind = 'hermes' | 'openclaw' | 'dsh' | 'acp';
 
 export interface AgentConfig {
   id: string;

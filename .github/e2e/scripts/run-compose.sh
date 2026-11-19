@@ -5,22 +5,25 @@ mode="${1:?usage: run-compose.sh local|ssh|tailscale|headscale hermes|openclaw|d
 target="${2:?usage: run-compose.sh local|ssh|tailscale|headscale hermes|openclaw|dsh}"
 case "$mode" in local|ssh|tailscale|headscale) ;; *) echo "unknown mode $mode" >&2; exit 2 ;; esac
 case "$target" in hermes|openclaw|dsh) ;; *) echo "unknown target $target" >&2; exit 2 ;; esac
-export COMPOSE_PROFILES="$target" E2E_TARGET="$target"
+export E2E_TARGET="$target" E2E_PROTOCOL="${E2E_PROTOCOL:-native}"
+case "$E2E_PROTOCOL" in native|acp) ;; *) echo "unknown protocol $E2E_PROTOCOL" >&2; exit 2 ;; esac
+export COMPOSE_PROFILES="$target"
+if [[ "$E2E_PROTOCOL" == acp ]]; then export COMPOSE_PROFILES="$target,acp"; fi
 
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
 mkdir -p .github/e2e/generated/dsh
-project="agent-link-e2e-$mode-$target"
+project="agent-link-e2e-$mode-$target-$E2E_PROTOCOL"
 files=(-f .github/e2e/compose.yml -f ".github/e2e/compose.$mode.yml")
 compose=(docker compose -p "$project" "${files[@]}")
 
 cleanup() {
   status=$?
   set +e
-  "${compose[@]}" logs --no-color > ".github/e2e/generated/e2e-$mode-$target.log" 2>&1
-  "${compose[@]}" down -v --remove-orphans >> ".github/e2e/generated/e2e-$mode-$target.log" 2>&1
+  "${compose[@]}" logs --no-color > ".github/e2e/generated/e2e-$mode-$target-$E2E_PROTOCOL.log" 2>&1
+  "${compose[@]}" down -v --remove-orphans >> ".github/e2e/generated/e2e-$mode-$target-$E2E_PROTOCOL.log" 2>&1
   if [[ "$mode" == headscale && -f "${RUNNER_TEMP:-/tmp}/headscale-e2e.log" ]]; then
-    cp "${RUNNER_TEMP:-/tmp}/headscale-e2e.log" .github/e2e/generated/headscale-$target-daemon.log
+    cp "${RUNNER_TEMP:-/tmp}/headscale-e2e.log" .github/e2e/generated/headscale-$target-$E2E_PROTOCOL-daemon.log
   fi
   if [[ "$mode" == headscale && -n "${TS_SOCKET:-}" ]]; then
     sudo tailscale --socket="$TS_SOCKET" down >/dev/null 2>&1
@@ -33,7 +36,12 @@ trap cleanup EXIT
 : "${HERMES_API_KEY:=e2e-hermes-gateway-token}"
 : "${OPENCLAW_GATEWAY_TOKEN:=e2e-openclaw-gateway-token}"
 export HERMES_API_KEY OPENCLAW_GATEWAY_TOKEN
-export E2E_NODE_SUFFIX="${E2E_NODE_SUFFIX:-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}}"
+case "$target" in
+  hermes) export E2E_NATIVE_PORT=8642 E2E_NATIVE_TOKEN="$HERMES_API_KEY" ;;
+  openclaw) export E2E_NATIVE_PORT=18789 E2E_NATIVE_TOKEN="$OPENCLAW_GATEWAY_TOKEN" ;;
+  dsh) export E2E_NATIVE_PORT=18790 E2E_NATIVE_TOKEN="" ;;
+esac
+export E2E_NODE_SUFFIX="${E2E_NODE_SUFFIX:-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$E2E_PROTOCOL}"
 if [[ "$mode" == headscale ]]; then
   export HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY:-pending}"
   export HEADSCALE_GATEWAY_IP="${HEADSCALE_GATEWAY_IP:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
@@ -163,4 +171,4 @@ if [[ "$target" == dsh ]]; then
   echo "DSH launch token loaded (${#DSH_GATEWAY_TOKEN} characters)"
 fi
 
-node .github/e2e/run.mjs 2>&1 | tee ".github/e2e/generated/adapter-$mode-$target.log"
+node .github/e2e/run.mjs 2>&1 | tee ".github/e2e/generated/adapter-$mode-$target-$E2E_PROTOCOL.log"
