@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AcpBridge } from '../src/acp/bridge.js';
 import { AcpAdapter } from '../src/adapters/acp.js';
@@ -122,5 +123,21 @@ describe('ACP provider and bridge', () => {
     }
     expect(native.cancelled).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: 'final', stopReason: 'cancelled' });
+  });
+
+  it('connects to a standard ACP stdio agent through ndJsonStream', async () => {
+    const adapter = new AcpAdapter('stdio', {
+      id: 'stdio',
+      kind: 'acp',
+      transport: 'local',
+      acpTransport: 'stdio',
+      acpCommand: process.execPath,
+      acpArgs: [fileURLToPath(new URL('./fixtures/acp-stdio-agent.mjs', import.meta.url))],
+    });
+    cleanups.push(() => adapter.close());
+    expect(await adapter.health()).toMatchObject({ ok: true, protocol: 'acp', protocolVersion: 1 });
+    const events = [];
+    for await (const event of adapter.prompt('stdio-alias', 'hello')) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'stdio:hello', stopReason: 'end_turn' });
   });
 });

@@ -76,7 +76,18 @@ The adapter exchanges that token through `/connect`, then uses `session/create`,
 
 ### 4. Optional: unify endpoints through ACP
 
-An ACP-compatible harness needs no bridge. Point one `acp` agent at its WebSocket endpoint, usually `/acp`, and set `AGENT_LINK_ACP_TOKEN` when the endpoint requires bearer authentication.
+An ACP-compatible harness needs no bridge. Point one `acp` agent at its WebSocket endpoint, usually `/acp`, and set `AGENT_LINK_ACP_TOKEN` when the endpoint requires bearer authentication. For a standard stdio agent, use `acpTransport: stdio` and `acpCommand` instead:
+
+```yaml
+- id: local-acp-agent
+  kind: acp
+  transport: local
+  acpTransport: stdio
+  acpCommand: /usr/local/bin/your-acp-agent
+  acpArgs: []
+```
+
+The same `acpTransport: stdio` configuration works with `transport: ssh`; the plugin starts `acpCommand` through system OpenSSH and carries ACP NDJSON over its stdin/stdout.
 
 For Hermes, OpenClaw, or remote dsh without a native ACP endpoint, start the bridge on that host. It connects to the existing loopback gateway and exposes the same ACP v1 methods for every target:
 
@@ -87,7 +98,7 @@ export AGENT_LINK_ACP_TOKEN='a-long-random-acp-token'
 dsh-agent-link-acp
 ```
 
-The native port defaults to `8642`, `18789`, or `18790` according to `AGENT_LINK_NATIVE_KIND`. Override it with `AGENT_LINK_NATIVE_PORT`. The ACP listener defaults to `127.0.0.1:18792`; set `AGENT_LINK_ACP_HOST` and `AGENT_LINK_ACP_PORT` for a private-network listener. Non-loopback listeners require `AGENT_LINK_ACP_TOKEN`. DSH bridges read `DSH_GATEWAY_TOKEN` when `AGENT_LINK_NATIVE_TOKEN` is omitted.
+The native port defaults to `8642`, `18789`, or `18790` according to `AGENT_LINK_NATIVE_KIND`. Override it with `AGENT_LINK_NATIVE_PORT`. The ACP listener defaults to `127.0.0.1:18792`; set `AGENT_LINK_ACP_HOST` and `AGENT_LINK_ACP_PORT` for a private-network listener. Non-loopback listeners require `AGENT_LINK_ACP_TOKEN`. DSH bridges read `DSH_GATEWAY_TOKEN` when `AGENT_LINK_NATIVE_TOKEN` is omitted. For an ACP stdio client such as an editor, run the bridge with `AGENT_LINK_ACP_STDIO=1`; protocol messages then use stdin/stdout instead of a listener.
 
 Use the same ACP configuration for a native ACP endpoint or a bridge:
 

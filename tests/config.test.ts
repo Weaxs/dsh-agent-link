@@ -29,6 +29,11 @@ describe('configuration and policy', () => {
     );
     expect(() =>
       normalizeConfig({
+        agents: [{ id: 'x', kind: 'acp', transport: 'direct', acpTransport: 'stdio', acpCommand: 'agent' }],
+      }),
+    ).toThrow(/stdio/);
+    expect(() =>
+      normalizeConfig({
         agents: [
           { id: 'x', kind: 'hermes', ssh: 'a' },
           { id: 'x', kind: 'hermes', ssh: 'b' },

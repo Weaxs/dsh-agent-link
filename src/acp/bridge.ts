@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { Readable, Writable } from 'node:stream';
 import {
   type AgentApp,
   type AgentConnection,
   agent,
   methods,
+  ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionResponse,
   type SessionUpdate,
@@ -23,6 +25,19 @@ export interface AcpBridgeOptions {
   host?: string;
   port?: number;
   token?: string;
+}
+
+export async function runAcpStdio(
+  config: AgentConfig,
+  factory: NativeAdapterFactory = createNativeAdapter,
+): Promise<void> {
+  const connection = createAcpAgent(config, factory(config)).connect(
+    ndJsonStream(
+      Writable.toWeb(process.stdout) as unknown as WritableStream<Uint8Array>,
+      Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>,
+    ),
+  );
+  await connection.closed;
 }
 
 export class AcpBridge {

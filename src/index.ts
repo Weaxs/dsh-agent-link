@@ -26,7 +26,7 @@ export async function apply(ctx: Context, input: PluginConfig = {}): Promise<voi
   });
 }
 
-export { AcpBridge, createAcpAgent } from './acp/bridge.js';
+export { AcpBridge, createAcpAgent, runAcpStdio } from './acp/bridge.js';
 export { AcpAdapter } from './adapters/acp.js';
 export { DshAdapter } from './adapters/dsh.js';
 export { HermesAdapter } from './adapters/hermes.js';

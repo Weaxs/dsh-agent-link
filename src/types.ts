@@ -21,6 +21,9 @@ export interface AgentConfig {
   dshProvider?: string;
   dshCwd?: string;
   reasoningEffort?: string;
+  acpTransport?: 'websocket' | 'stdio';
+  acpCommand?: string;
+  acpArgs?: string[];
   connectTimeoutMs?: number;
 }
 

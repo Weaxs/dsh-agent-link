@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import type { AgentConfig, AgentKind } from '../types.js';
-import { AcpBridge } from './bridge.js';
+import { AcpBridge, runAcpStdio } from './bridge.js';
 
 const kind = process.env.AGENT_LINK_NATIVE_KIND;
 if (!kind || !['hermes', 'openclaw', 'dsh'].includes(kind)) {
@@ -20,17 +20,21 @@ const config: AgentConfig = {
   openclawAgentId: process.env.AGENT_LINK_OPENCLAW_AGENT_ID,
   reasoningEffort: process.env.AGENT_LINK_REASONING_EFFORT,
 };
-const bridge = new AcpBridge(config);
-const address = await bridge.start({
-  host: process.env.AGENT_LINK_ACP_HOST,
-  port: Number(process.env.AGENT_LINK_ACP_PORT ?? 18_792),
-  token: process.env.AGENT_LINK_ACP_TOKEN,
-});
-console.log(`ACP bridge for ${kind} listening on ${address.host}:${address.port}`);
-for (const event of ['SIGINT', 'SIGTERM']) {
-  process.once(event, () => {
-    void bridge.close().then(() => {
-      process.exitCode = 0;
-    });
+if (process.env.AGENT_LINK_ACP_STDIO === '1') {
+  await runAcpStdio(config);
+} else {
+  const bridge = new AcpBridge(config);
+  const address = await bridge.start({
+    host: process.env.AGENT_LINK_ACP_HOST,
+    port: Number(process.env.AGENT_LINK_ACP_PORT ?? 18_792),
+    token: process.env.AGENT_LINK_ACP_TOKEN,
   });
+  console.log(`ACP bridge for ${kind} listening on ${address.host}:${address.port}`);
+  for (const event of ['SIGINT', 'SIGTERM']) {
+    process.once(event, () => {
+      void bridge.close().then(() => {
+        process.exitCode = 0;
+      });
+    });
+  }
 }

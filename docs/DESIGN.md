@@ -1,6 +1,6 @@
 # Agent Link design
 
-Status: native paths validated by real model-backed E2E across 12 transport/target combinations; the unified ACP v1 provider and bridge are implemented and covered by protocol integration tests.
+Status: native and unified ACP v1 paths validated by real model-backed E2E across 24 transport/target/protocol combinations.
 
 ## Goals
 
@@ -53,9 +53,9 @@ interface AgentAdapter {
 
 ### ACP v1 provider and bridge
 
-The `acp` kind is the single provider for any ACP-compatible endpoint. The official TypeScript SDK negotiates stable protocol v1 and carries JSON-RPC messages over its WebSocket transport. Session aliases are mapped to the actual ACP `sessionId`, so subsequent prompts continue the same conversation. The client uses the SDK's `ActiveSession` plus one event queue to preserve update/stop ordering without losing permission events to abandoned race waiters.
+The `acp` kind is the single provider for any ACP-compatible endpoint. The official TypeScript SDK negotiates stable protocol v1 and carries JSON-RPC messages over its WebSocket transport or standard NDJSON stdio. Stdio supports local subprocesses and ACP commands started through system OpenSSH. Session aliases are mapped to the actual ACP `sessionId`, so subsequent prompts continue the same conversation. The client uses the SDK's `ActiveSession` plus one event queue to preserve update/stop ordering without losing permission events to abandoned race waiters.
 
-The optional `dsh-agent-link-acp` bridge exposes `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission`. Each bridge connection constructs a native adapter for Hermes, OpenClaw, or remote DSH and translates only that adapter's normalized events. A native ACP endpoint bypasses the bridge entirely. Non-loopback bridge listeners require `AGENT_LINK_ACP_TOKEN`; native gateway credentials and ACP bearer tokens remain separate.
+The optional `dsh-agent-link-acp` bridge exposes `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission` over WebSocket or `AGENT_LINK_ACP_STDIO=1` stdio mode. Each bridge connection constructs a native adapter for Hermes, OpenClaw, or remote DSH and translates only that adapter's normalized events. A native ACP endpoint bypasses the bridge entirely. Non-loopback bridge listeners require `AGENT_LINK_ACP_TOKEN`; native gateway credentials and ACP bearer tokens remain separate.
 
 ACP v2, A2A, and additional UI transports are intentionally outside the current scope.
 
@@ -168,7 +168,7 @@ The current release has no `dsh_session_post` tool. Adding write access later re
 
 ## Validation and milestones
 
-Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, native DSH Session RPC, ACP prompt/continuation/tool/permission/cancel flows over the official WebSocket transport, job lifecycle, local and SSH HTTP transports, and MCP authorization/read/watch behavior. The transport matrix also completes real model-backed initial tasks and same-session continuations for Hermes, OpenClaw, and remote DSH over Local, SSH, Tailscale, and Headscale.
+Implemented checks cover configuration, redaction, Hermes API/SSE normalization, OpenClaw pairing over a real WebSocket, device identity persistence, native DSH Session RPC, ACP prompt/continuation/tool/permission/cancel flows over the official WebSocket transport and a real NDJSON stdio subprocess, job lifecycle, local and SSH HTTP transports, and MCP authorization/read/watch behavior. The transport matrix also completes real model-backed initial tasks and same-session continuations for Hermes, OpenClaw, and remote DSH over Local, SSH, Tailscale, and Headscale.
 
 Remaining deployment milestones:
 

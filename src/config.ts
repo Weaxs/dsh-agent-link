@@ -44,6 +44,14 @@ function normalizeAgent(agent: AgentConfig, ids: Set<string>): AgentConfig {
   port(result.port!, `${agent.id}.port`);
   if (transport !== 'ssh' && !result.host) result.host = '127.0.0.1';
   if (result.host?.startsWith('-')) throw new ConfigError(`${agent.id}: invalid host`);
+  if (result.acpTransport === 'stdio') {
+    if (result.kind !== 'acp') throw new ConfigError(`${agent.id}: acpTransport requires kind acp`);
+    if (transport === 'direct') throw new ConfigError(`${agent.id}: ACP stdio requires local or ssh transport`);
+    if (!result.acpCommand?.trim()) throw new ConfigError(`${agent.id}: ACP stdio requires acpCommand`);
+  }
+  if (result.acpArgs?.some((argument) => typeof argument !== 'string')) {
+    throw new ConfigError(`${agent.id}: acpArgs must be strings`);
+  }
   if (
     result.connectTimeoutMs !== undefined &&
     (!Number.isSafeInteger(result.connectTimeoutMs) || result.connectTimeoutMs < 100)

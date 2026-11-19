@@ -1,4 +1,7 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { Readable, Writable } from 'node:stream';
 import {
   type ActiveSession,
   type ActiveSessionMessage,
@@ -6,6 +9,7 @@ import {
   type ClientConnection,
   client,
   methods,
+  ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionResponse,
   type SessionUpdate,
@@ -15,6 +19,7 @@ import WebSocket from 'ws';
 import { AsyncQueue } from '../async-queue.js';
 import { secret } from '../config.js';
 import { transportFor } from '../transports/http.js';
+import { sshArguments } from '../transports/stdio-socket.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
 
 interface PendingPermission {
@@ -31,6 +36,7 @@ export class AcpAdapter implements AgentAdapter {
   private readonly sessionIds = new Map<string, string>();
   private readonly permissions = new Map<string, PendingPermission>();
   private connection?: ClientConnection;
+  private child?: ChildProcess;
   private connecting?: Promise<void>;
   private capabilities?: AgentCapabilities;
 
@@ -170,6 +176,7 @@ export class AcpAdapter implements AgentAdapter {
     this.connection?.close();
     this.connection = undefined;
     this.connecting = undefined;
+    await this.closeProcess();
     await this.transport.close();
   }
 
@@ -177,9 +184,10 @@ export class AcpAdapter implements AgentAdapter {
     if (this.connection && !this.connection.signal.aborted) return;
     if (this.connecting) return this.connecting;
     this.connecting = this.open(signal)
-      .catch((error) => {
+      .catch(async (error) => {
         this.connection?.close();
         this.connection = undefined;
+        await this.closeProcess();
         throw error;
       })
       .finally(() => {
@@ -189,13 +197,8 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   private async open(signal?: AbortSignal): Promise<void> {
-    const host = this.transport.kind === 'ssh' ? '127.0.0.1' : (this.config.host ?? '127.0.0.1');
-    const protocol = this.transport.kind !== 'ssh' && this.config.tls ? 'wss' : 'ws';
-    const token = secret(this.config);
-    const stream = createWebSocketStream(`${protocol}://${host}:${this.config.port ?? 18_792}/acp`, {
-      WebSocket: acpWebSocketConstructor(this.transport),
-      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
-    });
+    await this.closeProcess();
+    const stream = this.config.acpTransport === 'stdio' ? this.openStdio() : this.openWebSocket();
     const app = client({ name: 'dsh-agent-link' });
     app.onRequest(methods.client.session.requestPermission, ({ params }) => {
       const requestId = params.toolCall.toolCallId;
@@ -232,6 +235,51 @@ export class AcpAdapter implements AgentAdapter {
       signal,
     );
     this.capabilities = initialized.agentCapabilities;
+  }
+
+  private openWebSocket() {
+    const host = this.transport.kind === 'ssh' ? '127.0.0.1' : (this.config.host ?? '127.0.0.1');
+    const protocol = this.transport.kind !== 'ssh' && this.config.tls ? 'wss' : 'ws';
+    const token = secret(this.config);
+    return createWebSocketStream(`${protocol}://${host}:${this.config.port ?? 18_792}/acp`, {
+      WebSocket: acpWebSocketConstructor(this.transport),
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    });
+  }
+
+  private openStdio() {
+    const command = this.config.acpCommand!;
+    const args = this.config.acpArgs ?? [];
+    const ssh = this.transport.kind === 'ssh';
+    const child = spawn(
+      ssh ? 'ssh' : command,
+      ssh
+        ? [...sshArguments(this.config).slice(0, -3), this.config.ssh!, '--', command, ...args].map((argument) =>
+            /[\s'"]/.test(argument) ? `'${argument.replaceAll("'", "'\\''")}'` : argument,
+          )
+        : args,
+      { stdio: ['pipe', 'pipe', 'inherit'] },
+    );
+    this.child = child;
+    child.on('error', (error) => {
+      for (const queue of this.queues.values()) queue.fail(error);
+      child.stdin!.destroy();
+      child.stdout!.destroy();
+    });
+    return ndJsonStream(
+      Writable.toWeb(child.stdin!) as unknown as WritableStream<Uint8Array>,
+      Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>,
+    );
+  }
+
+  private async closeProcess(): Promise<void> {
+    const child = this.child;
+    this.child = undefined;
+    if (!child) return;
+    child.stdin!.end();
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill();
+    await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 1000))]);
   }
 }
 
