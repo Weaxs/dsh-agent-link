@@ -105,7 +105,7 @@ EOF
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --netfilter-mode=off --login-server="http://${HEADSCALE_GATEWAY_IP}:28080" --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
+    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --netfilter-mode=off --login-server="http://${HEADSCALE_GATEWAY_IP}:28080" --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=false --reset
     ;;
 esac
 

@@ -22,7 +22,8 @@ dns:
   override_local_dns: false
   nameservers:
     global:
-      - 1.1.1.1
+      - 223.5.5.5
+      - 119.29.29.29
 
 derp:
   server:

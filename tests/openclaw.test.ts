@@ -1,3 +1,4 @@
+import { createPublicKey, verify as verifySignature } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,6 +81,26 @@ describe('device identity', () => {
     const first = loadOrCreateIdentity('test', root);
     const second = loadOrCreateIdentity('test', root);
     expect(second.deviceId).toBe(first.deviceId);
-    expect(signClaim(first, 'nonce', 'token')).toMatch(/^[a-zA-Z0-9_-]+$/);
+    const signature = signClaim(first, 'nonce', 'token');
+    expect(signature).toMatch(/^[a-zA-Z0-9_-]+$/);
+    const payload = [
+      'v2',
+      first.deviceId,
+      'openclaw-control-ui',
+      'webchat',
+      'operator',
+      'operator.admin,operator.read,operator.write,operator.approvals,operator.pairing',
+      String(first.signedAtMs),
+      'token',
+      'nonce',
+    ].join('|');
+    expect(
+      verifySignature(
+        null,
+        Buffer.from(payload),
+        createPublicKey({ key: first.publicKey as any, format: 'jwk' }),
+        Buffer.from(signature, 'base64url'),
+      ),
+    ).toBe(true);
   });
 });

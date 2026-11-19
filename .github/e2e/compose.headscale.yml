@@ -2,8 +2,8 @@ x-headscale-client-environment: &headscale-client-environment
   TS_AUTHKEY: ${HEADSCALE_AUTHKEY}
   TS_STATE_DIR: /var/lib/tailscale
   TS_USERSPACE: "false"
-  TS_ACCEPT_DNS: "true"
-  TS_EXTRA_ARGS: --login-server=http://${HEADSCALE_GATEWAY_IP}:28080 --accept-dns=true
+  TS_ACCEPT_DNS: "false"
+  TS_EXTRA_ARGS: --login-server=http://${HEADSCALE_GATEWAY_IP}:28080 --accept-dns=false
 
 x-headscale-client-service: &headscale-client-service
   image: tailscale/tailscale:latest

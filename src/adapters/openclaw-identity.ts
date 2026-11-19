@@ -47,7 +47,6 @@ export function signClaim(
     identity.deviceId,
     'openclaw-control-ui',
     'webchat',
-    'web',
     'operator',
     'operator.admin,operator.read,operator.write,operator.approvals,operator.pairing',
     String(signedAt),

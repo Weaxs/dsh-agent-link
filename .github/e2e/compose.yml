@@ -5,6 +5,7 @@ x-openai-environment: &openai-environment
 services:
   hermes:
     image: nousresearch/hermes-agent:latest
+    dns: [223.5.5.5, 119.29.29.29]
     command: gateway run
     environment:
       <<: *openai-environment
@@ -30,6 +31,7 @@ services:
 
   openclaw:
     image: openclaw/openclaw:latest
+    dns: [223.5.5.5, 119.29.29.29]
     entrypoint: ["tini", "-s", "--", "node", "openclaw.mjs", "gateway"]
     environment:
       OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
