@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AgentManager } from '../dist/manager.js';
+import { AgentManager } from '../../dist/manager.js';
 
 const mode = process.env.E2E_TRANSPORT ?? 'local';
 const label = process.env.E2E_MODE_LABEL ?? mode;

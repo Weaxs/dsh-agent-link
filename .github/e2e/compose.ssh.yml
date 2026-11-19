@@ -1,4 +1,11 @@
 services:
+  hermes:
+    ports:
+      - "22022:2222"
+  openclaw:
+    ports:
+      - "22023:2222"
+
   hermes-ssh:
     image: linuxserver/openssh-server:latest
     network_mode: service:hermes
@@ -11,8 +18,6 @@ services:
       USER_NAME: agent
       PASSWORD_ACCESS: "false"
       PUBLIC_KEY: ${E2E_SSH_PUBLIC_KEY}
-    ports:
-      - "22022:2222"
 
   openclaw-ssh:
     image: linuxserver/openssh-server:latest
@@ -26,5 +31,3 @@ services:
       USER_NAME: agent
       PASSWORD_ACCESS: "false"
       PUBLIC_KEY: ${E2E_SSH_PUBLIC_KEY}
-    ports:
-      - "22023:2222"

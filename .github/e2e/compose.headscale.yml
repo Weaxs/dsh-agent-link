@@ -3,7 +3,7 @@ x-headscale-client-environment: &headscale-client-environment
   TS_STATE_DIR: /var/lib/tailscale
   TS_USERSPACE: "false"
   TS_ACCEPT_DNS: "true"
-  TS_EXTRA_ARGS: --login-server=http://host.docker.internal:28080 --accept-dns=true
+  TS_EXTRA_ARGS: --login-server=http://${HEADSCALE_GATEWAY_IP}:28080 --accept-dns=true
 
 x-headscale-client-service: &headscale-client-service
   image: tailscale/tailscale:latest
@@ -11,8 +11,6 @@ x-headscale-client-service: &headscale-client-service
     - NET_ADMIN
   devices:
     - /dev/net/tun
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
 
 services:
   headscale:
@@ -32,7 +30,7 @@ services:
         condition: service_healthy
     environment:
       <<: *headscale-client-environment
-      TS_HOSTNAME: hermes-e2e
+      TS_HOSTNAME: hermes-e2e-${E2E_NODE_SUFFIX}
     volumes:
       - hermes-tailscale-state:/var/lib/tailscale
 
@@ -44,7 +42,7 @@ services:
         condition: service_healthy
     environment:
       <<: *headscale-client-environment
-      TS_HOSTNAME: openclaw-e2e
+      TS_HOSTNAME: openclaw-e2e-${E2E_NODE_SUFFIX}
     volumes:
       - openclaw-tailscale-state:/var/lib/tailscale
 

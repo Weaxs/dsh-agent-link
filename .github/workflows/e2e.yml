@@ -2,17 +2,28 @@ name: Transport Integration Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      transport:
+        description: Transport to test
+        required: true
+        default: all
+        type: choice
+        options: [all, local, ssh, tailscale, headscale]
   push:
     branches: [main]
     paths:
       - "src/**"
-      - "e2e/**"
+      - ".github/e2e/**"
       - ".github/workflows/e2e.yml"
       - ".github/actions/prepare-e2e/**"
       - "package.json"
       - "package-lock.json"
   schedule:
     - cron: "0 2 * * 1"
+
+concurrency:
+  group: transport-integration-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -33,6 +44,7 @@ jobs:
       tailscale_configured: ${{ steps.check.outputs.tailscale_configured }}
     steps:
       - id: check
+        name: Verify required secrets
         shell: bash
         run: |
           model=false
@@ -47,85 +59,93 @@ jobs:
           fi
           if [[ "$model" == true && "$tailscale" != true ]]; then
             message="TAILSCALE_AUTHKEY is not configured; the Tailscale job will be skipped."
-            if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message"; fi
+            if [[ "${{ github.event_name }}" == workflow_dispatch && ( "${{ inputs.transport }}" == all || "${{ inputs.transport }}" == tailscale ) ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message"; fi
           fi
 
   local:
     name: Local / Hermes and OpenClaw
     needs: preflight
-    if: needs.preflight.outputs.model_configured == 'true'
+    if: >-
+      needs.preflight.outputs.model_configured == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.transport == 'all' || inputs.transport == 'local')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/prepare-e2e
-      - name: Run real local E2E
-        run: bash e2e/scripts/run-compose.sh local
+      - name: Run local transport tests
+        run: bash .github/e2e/scripts/run-compose.sh local
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-local-logs
-          path: e2e/generated/e2e-local.log
+          path: .github/e2e/generated/e2e-local.log
 
   ssh:
     name: SSH / Hermes and OpenClaw
     needs: preflight
-    if: needs.preflight.outputs.model_configured == 'true'
+    if: >-
+      needs.preflight.outputs.model_configured == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.transport == 'all' || inputs.transport == 'ssh')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/prepare-e2e
-      - name: Run real SSH E2E
-        run: bash e2e/scripts/run-compose.sh ssh
+      - name: Run SSH transport tests
+        run: bash .github/e2e/scripts/run-compose.sh ssh
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-ssh-logs
-          path: e2e/generated/e2e-ssh.log
+          path: .github/e2e/generated/e2e-ssh.log
 
   tailscale:
     name: Tailscale / Hermes and OpenClaw
     needs: preflight
-    if: needs.preflight.outputs.tailscale_configured == 'true'
+    if: >-
+      needs.preflight.outputs.tailscale_configured == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.transport == 'all' || inputs.transport == 'tailscale')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/prepare-e2e
       - name: Join the test tailnet
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-      - name: Run real Tailscale E2E
-        run: bash e2e/scripts/run-compose.sh tailscale
+      - name: Run Tailscale transport tests
+        run: bash .github/e2e/scripts/run-compose.sh tailscale
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-tailscale-logs
-          path: e2e/generated/e2e-tailscale.log
+          path: .github/e2e/generated/e2e-tailscale.log
 
   headscale:
     name: Headscale / Hermes and OpenClaw
     needs: preflight
-    if: needs.preflight.outputs.model_configured == 'true'
+    if: >-
+      needs.preflight.outputs.model_configured == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.transport == 'all' || inputs.transport == 'headscale')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/prepare-e2e
-      - name: Run real self-hosted Headscale E2E
-        run: bash e2e/scripts/run-compose.sh headscale
+      - name: Run Headscale transport tests
+        run: bash .github/e2e/scripts/run-compose.sh headscale
       - name: Upload Headscale logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: e2e-headscale-logs
           path: |
-            e2e/generated/e2e-headscale.log
-            /tmp/headscale-e2e.log
+            .github/e2e/generated/e2e-headscale.log
+            .github/e2e/generated/headscale-daemon.log

@@ -10,10 +10,12 @@ const args =
 const { stdout } = await execute(command, args, { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 });
 const status = JSON.parse(stdout);
 const peers = Object.values(status.Peer ?? {});
+const suffix = process.env.E2E_NODE_SUFFIX ?? 'local';
 
 for (const kind of ['hermes', 'openclaw']) {
-  const peer = peers.find((item) => item.HostName === `${kind}-e2e`);
+  const hostname = `${kind}-e2e-${suffix}`;
+  const peer = peers.find((item) => item.HostName === hostname);
   const ip = peer?.TailscaleIPs?.[0];
-  if (!ip) throw new Error(`Tailscale peer ${kind}-e2e is not online or has no IPv4 address`);
+  if (!ip) throw new Error(`Tailscale peer ${hostname} is not online or has no IPv4 address`);
   console.log(`export ${kind.toUpperCase()}_HOST=${ip}`);
 }

@@ -67,7 +67,7 @@ To run one transport locally with Docker and the same credentials:
 export OPENAI_BASE_URL='https://your-endpoint.example/v1'
 export OPENAI_API_KEY='...'
 export OPENAI_MODEL_NAME='your-model'
-bash e2e/scripts/run-compose.sh local
+bash .github/e2e/scripts/run-compose.sh local
 ```
 
 For the Tailscale mode, also export `TAILSCALE_AUTHKEY` and connect the local machine to the same tailnet first. The Headscale script starts its own control plane and joins the local machine to it. Docker is required for all four modes; installing Hermes or OpenClaw on the host is not.

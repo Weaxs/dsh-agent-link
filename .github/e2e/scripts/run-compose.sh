@@ -4,18 +4,21 @@ set -euo pipefail
 mode="${1:?usage: run-compose.sh local|ssh|tailscale|headscale}"
 case "$mode" in local|ssh|tailscale|headscale) ;; *) echo "unknown mode $mode" >&2; exit 2 ;; esac
 
-root="$(cd "$(dirname "$0")/../.." && pwd)"
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
-mkdir -p e2e/generated
+mkdir -p .github/e2e/generated
 project="agent-link-e2e-$mode"
-files=(-f e2e/compose.yml -f "e2e/compose.$mode.yml")
+files=(-f .github/e2e/compose.yml -f ".github/e2e/compose.$mode.yml")
 compose=(docker compose -p "$project" "${files[@]}")
 
 cleanup() {
   status=$?
   set +e
-  "${compose[@]}" logs --no-color > "e2e/generated/e2e-$mode.log" 2>&1
-  "${compose[@]}" down -v --remove-orphans >> "e2e/generated/e2e-$mode.log" 2>&1
+  "${compose[@]}" logs --no-color > ".github/e2e/generated/e2e-$mode.log" 2>&1
+  "${compose[@]}" down -v --remove-orphans >> ".github/e2e/generated/e2e-$mode.log" 2>&1
+  if [[ "$mode" == headscale && -f "${RUNNER_TEMP:-/tmp}/headscale-e2e.log" ]]; then
+    cp "${RUNNER_TEMP:-/tmp}/headscale-e2e.log" .github/e2e/generated/headscale-daemon.log
+  fi
   if [[ "$mode" == headscale && -n "${TS_SOCKET:-}" ]]; then
     sudo tailscale --socket="$TS_SOCKET" down >/dev/null 2>&1
     sudo pkill -f 'tailscaled.*headscale-e2e.state' >/dev/null 2>&1
@@ -27,10 +30,15 @@ trap cleanup EXIT
 : "${HERMES_API_KEY:=e2e-hermes-gateway-token}"
 : "${OPENCLAW_GATEWAY_TOKEN:=e2e-openclaw-gateway-token}"
 export HERMES_API_KEY OPENCLAW_GATEWAY_TOKEN
+export E2E_NODE_SUFFIX="${E2E_NODE_SUFFIX:-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}}"
+if [[ "$mode" == headscale ]]; then
+  export HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY:-pending}"
+  export HEADSCALE_GATEWAY_IP="${HEADSCALE_GATEWAY_IP:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
+fi
 export E2E_CONTAINER_OPENAI_BASE_URL="$(node -e "process.stdout.write(process.env.OPENAI_BASE_URL.replace(/^(https?:\\/\\/)(?:127\\.0\\.0\\.1|localhost)(?=[:/]|$)/,'\$1host.docker.internal'))")"
 
 npm run build
-node e2e/scripts/write-config.mjs
+node .github/e2e/scripts/write-config.mjs
 "${compose[@]}" config --quiet
 
 case "$mode" in
@@ -39,15 +47,15 @@ case "$mode" in
     ;;
   ssh)
     export E2E_TRANSPORT=ssh E2E_MODE_LABEL=ssh HERMES_PORT=8642 OPENCLAW_PORT=18789
-    ssh-keygen -q -t ed25519 -N '' -f e2e/generated/id_ed25519
-    chmod 600 e2e/generated/id_ed25519
-    export E2E_SSH_PUBLIC_KEY="$(cat e2e/generated/id_ed25519.pub)"
-    cat > e2e/generated/ssh_config <<'EOF'
+    ssh-keygen -q -t ed25519 -N '' -f .github/e2e/generated/id_ed25519
+    chmod 600 .github/e2e/generated/id_ed25519
+    export E2E_SSH_PUBLIC_KEY="$(cat .github/e2e/generated/id_ed25519.pub)"
+    cat > .github/e2e/generated/ssh_config <<'EOF'
 Host hermes-e2e
   HostName 127.0.0.1
   Port 22022
   User agent
-  IdentityFile e2e/generated/id_ed25519
+  IdentityFile .github/e2e/generated/id_ed25519
   IdentitiesOnly yes
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
@@ -56,12 +64,12 @@ Host openclaw-e2e
   HostName 127.0.0.1
   Port 22023
   User agent
-  IdentityFile e2e/generated/id_ed25519
+  IdentityFile .github/e2e/generated/id_ed25519
   IdentitiesOnly yes
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
 EOF
-    export E2E_SSH_CONFIG="$root/e2e/generated/ssh_config"
+    export E2E_SSH_CONFIG="$root/.github/e2e/generated/ssh_config"
     ;;
   tailscale)
     if [[ -z "${TAILSCALE_AUTHKEY:-}" ]]; then
@@ -91,7 +99,7 @@ EOF
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    sudo tailscale --socket="$TS_SOCKET" up --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname=runner-e2e --accept-dns=true --reset
+    sudo tailscale --socket="$TS_SOCKET" up --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
     ;;
 esac
 
@@ -100,10 +108,10 @@ esac
 if [[ "$mode" == tailscale || "$mode" == headscale ]]; then
   connected=false
   for _ in {1..45}; do
-    if eval "$(node e2e/scripts/tailscale-env.mjs)"; then connected=true; break; fi
+    if eval "$(node .github/e2e/scripts/tailscale-env.mjs)"; then connected=true; break; fi
     sleep 2
   done
   if [[ "$connected" != true ]]; then echo 'Tailscale peers did not become available' >&2; exit 1; fi
 fi
 
-node e2e/run.mjs
+node .github/e2e/run.mjs

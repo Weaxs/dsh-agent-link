@@ -10,8 +10,6 @@ x-tailscale-service: &tailscale-service
     - NET_ADMIN
   devices:
     - /dev/net/tun
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
 
 services:
   hermes-tailscale:
@@ -22,7 +20,7 @@ services:
         condition: service_healthy
     environment:
       <<: *tailscale-environment
-      TS_HOSTNAME: hermes-e2e
+      TS_HOSTNAME: hermes-e2e-${E2E_NODE_SUFFIX}
     volumes:
       - hermes-tailscale-state:/var/lib/tailscale
 
@@ -34,7 +32,7 @@ services:
         condition: service_healthy
     environment:
       <<: *tailscale-environment
-      TS_HOSTNAME: openclaw-e2e
+      TS_HOSTNAME: openclaw-e2e-${E2E_NODE_SUFFIX}
     volumes:
       - openclaw-tailscale-state:/var/lib/tailscale
 

@@ -4,7 +4,7 @@ description: Check out and build the plugin, then generate OpenClaw's model conf
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v5
       with:
         node-version: 24
         cache: npm
@@ -12,5 +12,5 @@ runs:
       shell: bash
     - run: npm run build
       shell: bash
-    - run: node e2e/scripts/write-config.mjs
+    - run: node .github/e2e/scripts/write-config.mjs
       shell: bash

@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 for (const name of ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL_NAME']) {
@@ -15,7 +15,7 @@ const containerBaseUrl = process.env.OPENAI_BASE_URL.replace(
   /^(https?:\/\/)(?:127\.0\.0\.1|localhost)(?=[:/]|$)/,
   '$1host.docker.internal',
 );
-const output = process.env.E2E_CONFIG_OUTPUT ?? resolve('e2e/generated/openclaw.json');
+const output = process.env.E2E_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/openclaw.json');
 const config = {
   gateway: {
     port: 18789,
@@ -66,7 +66,8 @@ const config = {
 };
 
 mkdirSync(dirname(output), { recursive: true });
-writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o644 });
+chmodSync(output, 0o644);
 if (process.env.GITHUB_ENV) {
   appendFileSync(process.env.GITHUB_ENV, `E2E_CONTAINER_OPENAI_BASE_URL=${containerBaseUrl}\n`);
 }
