@@ -40,17 +40,20 @@ async function verify(kind) {
   const startedAt = Date.now();
   try {
     console.log(`[e2e] ${label}/${kind}: health check`);
-    const deadline = Date.now() + 45_000;
-    let waitingForPairing = false;
+    const deadline = Date.now() + 90_000;
+    let waitingReason = '';
     while (true) {
       try {
         await manager.adapter(config.id).health();
         break;
       } catch (error) {
         const message = String(error?.message ?? error);
-        if (!/pairing|not approved|not-paired/i.test(message) || Date.now() >= deadline) throw error;
-        if (!waitingForPairing) console.log(`[e2e] ${label}/${kind}: waiting for OpenClaw device approval`);
-        waitingForPairing = true;
+        const pairing = /pairing|not approved|not-paired/i.test(message);
+        const transient = /ETIMEDOUT|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|socket hang up/i.test(message);
+        if ((!pairing && !transient) || Date.now() >= deadline) throw error;
+        const reason = pairing ? 'waiting for OpenClaw device approval' : 'waiting for the transport to become ready';
+        if (waitingReason !== reason) console.log(`[e2e] ${label}/${kind}: ${reason}`);
+        waitingReason = reason;
         await new Promise((resolve) => setTimeout(resolve, 2_000));
       }
     }
