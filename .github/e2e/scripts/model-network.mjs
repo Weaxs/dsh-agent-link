@@ -30,6 +30,9 @@ if (hostname === '127.0.0.1' || hostname === 'localhost') {
       failures.push(error.message);
     }
   }
+  if (!address && process.env.E2E_MODEL_HOST === hostname && process.env.E2E_MODEL_IP) {
+    address = process.env.E2E_MODEL_IP;
+  }
   if (!address) {
     throw new Error(`No public IPv4 address found for the model API hostname ${hostname}: ${failures.join('; ')}`);
   }

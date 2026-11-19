@@ -44,7 +44,7 @@ Headscale needs no external account or secret. Each job creates its own user and
 - OpenClaw receives a generated `openclaw.json` using `models.providers.openai` with `openai-completions` and `agents.defaults.model.primary = openai/<model>`.
 - DSH receives the OpenAI-compatible environment and selects the exact model through native `session/selectModel` before prompting.
 
-No tools are enabled for the test task. Containers use AliDNS (`223.5.5.5`) and DNSPod (`119.29.29.29`) because the configured model endpoint uses region-specific DNS answers. Tailscale sidecars do not replace those resolvers.
+No tools are enabled for the test task. Containers use AliDNS (`223.5.5.5`) and DNSPod (`119.29.29.29`) because the configured model endpoint uses region-specific DNS answers. The runner also tries DoH providers and writes a returned IPv4 address into container `/etc/hosts`; a public regional-DNS fallback mapping in `.github/workflows/e2e.yml` is used only when those providers return NXDOMAIN. Tailscale sidecars do not replace those resolvers.
 
 If `OPENAI_BASE_URL` points to `127.0.0.1` or `localhost`, the generated container configuration rewrites the host to `host.docker.internal`. On Linux, Compose maps that name through `host-gateway`.
 

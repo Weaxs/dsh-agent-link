@@ -40,6 +40,9 @@ env:
   OPENAI_MODEL_NAME: ${{ secrets.OPENAI_MODEL_NAME }}
   HERMES_API_KEY: e2e-hermes-gateway-token
   OPENCLAW_GATEWAY_TOKEN: e2e-openclaw-gateway-token
+  # Regional-DNS fallback for the configured OpenAI-compatible endpoint.
+  E2E_MODEL_HOST: ka.vipbigmodel.cn
+  E2E_MODEL_IP: 39.106.202.176
 
 jobs:
   preflight:
