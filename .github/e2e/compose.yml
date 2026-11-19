@@ -33,6 +33,7 @@ services:
     entrypoint: ["tini", "-s", "--", "node", "openclaw.mjs", "gateway"]
     environment:
       OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
+      OPENCLAW_STATE_DIR: /tmp/openclaw-state
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
@@ -57,6 +58,7 @@ services:
         condition: service_healthy
     environment:
       OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
+      OPENCLAW_STATE_DIR: /tmp/openclaw-state
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
     volumes:
       - ./scripts/approve-openclaw.mjs:/e2e/approve-openclaw.mjs:ro

@@ -31,7 +31,6 @@ export class StdioSocket extends Duplex {
     super();
     this.child = child;
     child.stdout?.on('data', (chunk: Buffer) => this.push(chunk));
-    child.stdout?.on('end', () => this.push(null));
     child.stderr?.on('data', (chunk: Buffer) => {
       this.stderr = (this.stderr + chunk.toString('utf8')).slice(-8_192);
     });

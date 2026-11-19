@@ -6,7 +6,7 @@ let lastError = '';
 
 async function approvePending() {
   try {
-    const { stdout } = await execute('openclaw', ['devices', 'pending', '--json'], {
+    const { stdout } = await execute('openclaw', ['devices', 'list', '--json'], {
       timeout: 15_000,
       maxBuffer: 4 * 1024 * 1024,
     });
@@ -27,7 +27,11 @@ async function approvePending() {
 function requestIds(text) {
   try {
     const value = JSON.parse(text);
-    return findIds(value);
+    const pending =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value.pending ?? value.requests ?? value.pendingRequests ?? value)
+        : value;
+    return findIds(pending);
   } catch {
     return [...text.matchAll(/(?:requestId|request_id|deviceRequestId)["'\s:=]+([a-zA-Z0-9_-]+)/g)].map(
       (match) => match[1],

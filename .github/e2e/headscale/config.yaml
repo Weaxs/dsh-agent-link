@@ -1,4 +1,4 @@
-server_url: http://127.0.0.1:28080
+server_url: http://__HEADSCALE_GATEWAY_IP__:28080
 listen_addr: 0.0.0.0:8080
 metrics_listen_addr: 0.0.0.0:9090
 grpc_listen_addr: 0.0.0.0:50443

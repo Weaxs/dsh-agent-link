@@ -35,6 +35,7 @@ async function verify(kind) {
   try {
     console.log(`[e2e] ${label}/${kind}: health check`);
     await manager.adapter(config.id).health();
+    console.log(`[e2e] ${label}/${kind}: health check passed; starting model task`);
     const first = manager.start(
       config.id,
       `Remember this exact token: ${marker}. Reply with only ${marker} and no other text. Do not call any tools.`,
@@ -68,7 +69,14 @@ function assertCompleted(job, marker, stage) {
   }
 }
 
+const failures = [];
 for (const kind of ['hermes', 'openclaw']) {
-  await verify(kind);
+  try {
+    await verify(kind);
+  } catch (error) {
+    failures.push(kind);
+    console.error(`[e2e] ${label}/${kind}: FAILED`, error);
+  }
 }
+if (failures.length > 0) throw new Error(`${label}: transport tests failed for ${failures.join(', ')}`);
 console.log(`E2E_PASS ${label}: Hermes and OpenClaw completed real model-backed tasks and continuations`);

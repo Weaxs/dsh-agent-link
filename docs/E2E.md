@@ -53,7 +53,7 @@ If `OPENAI_BASE_URL` points to `127.0.0.1` or `localhost`, the generated contain
 ## OpenClaw device approval
 
 - Local and SSH-forwarded connections use OpenClaw's trusted loopback auto-approval behavior.
-- Tailscale and Headscale are remote connections. A sidecar watches `openclaw devices pending --json` and calls `openclaw devices approve <requestId>` for new test devices.
+- Tailscale and Headscale are remote connections. A sidecar watches `openclaw devices list --json` and calls `openclaw devices approve <requestId>` for new test devices.
 
 This is real OpenClaw pairing, not a bypass in the plugin. Each test run persists its own Ed25519 device identity for that gateway connection.
 

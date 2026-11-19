@@ -17,10 +17,11 @@ services:
     image: headscale/headscale:latest
     command: serve
     volumes:
-      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - ./generated/headscale-config.yaml:/etc/headscale/config.yaml:ro
       - headscale-data:/var/lib/headscale
     ports:
       - "28080:8080"
+      - "3478:3478/udp"
 
   hermes-tailscale:
     <<: *headscale-client-service

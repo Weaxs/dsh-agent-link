@@ -34,6 +34,7 @@ export E2E_NODE_SUFFIX="${E2E_NODE_SUFFIX:-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_
 if [[ "$mode" == headscale ]]; then
   export HEADSCALE_AUTHKEY="${HEADSCALE_AUTHKEY:-pending}"
   export HEADSCALE_GATEWAY_IP="${HEADSCALE_GATEWAY_IP:-$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')}"
+  sed "s|__HEADSCALE_GATEWAY_IP__|${HEADSCALE_GATEWAY_IP}|g" .github/e2e/headscale/config.yaml > .github/e2e/generated/headscale-config.yaml
 fi
 export E2E_CONTAINER_OPENAI_BASE_URL="$(node -e "process.stdout.write(process.env.OPENAI_BASE_URL.replace(/^(https?:\\/\\/)(?:127\\.0\\.0\\.1|localhost)(?=[:/]|$)/,'\$1host.docker.internal'))")"
 
@@ -104,11 +105,17 @@ EOF
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --netfilter-mode=off --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
+    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --netfilter-mode=off --login-server="http://${HEADSCALE_GATEWAY_IP}:28080" --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
     ;;
 esac
 
 "${compose[@]}" up -d --wait
+
+if [[ "$mode" == ssh ]]; then
+  for alias in hermes-e2e openclaw-e2e; do
+    ssh -F "$E2E_SSH_CONFIG" -T -o BatchMode=yes -o ConnectTimeout=10 "$alias" true
+  done
+fi
 
 if [[ "$mode" == tailscale || "$mode" == headscale ]]; then
   connected=false
