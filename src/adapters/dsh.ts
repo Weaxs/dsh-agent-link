@@ -8,6 +8,7 @@ export class DshAdapter implements AgentAdapter {
   private readonly transport: Transport;
   private cookie?: string;
   private readonly cursors = new Map<string, number>();
+  private readonly sessionIds = new Map<string, string>();
 
   constructor(
     readonly id: string,
@@ -35,17 +36,21 @@ export class DshAdapter implements AgentAdapter {
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     const requestedId = sessionId ?? randomUUID();
-    let actualId = requestedId;
+    let actualId = this.sessionIds.get(requestedId) ?? requestedId;
     try {
-      const created = await this.rpc(
-        'create',
-        {
-          sessionId: requestedId,
-          ...(this.config.dshCwd ? { cwd: this.config.dshCwd } : {}),
-        },
-        signal,
-      );
-      actualId = String(created.sessionId ?? requestedId);
+      if (!this.sessionIds.has(requestedId)) {
+        const created = await this.rpc(
+          'create',
+          {
+            sessionId: requestedId,
+            ...(this.config.dshCwd ? { cwd: this.config.dshCwd } : {}),
+          },
+          signal,
+        );
+        actualId = String(created.sessionId ?? requestedId);
+        this.sessionIds.set(requestedId, actualId);
+        this.sessionIds.set(actualId, actualId);
+      }
       if (this.config.model) {
         await this.rpc(
           'selectModel',
@@ -133,7 +138,7 @@ export class DshAdapter implements AgentAdapter {
   }
 
   async cancel(sessionId: string, signal?: AbortSignal): Promise<void> {
-    await this.rpc('cancel', { sessionId }, signal);
+    await this.rpc('cancel', { sessionId: this.sessionIds.get(sessionId) ?? sessionId }, signal);
   }
 
   async close(): Promise<void> {

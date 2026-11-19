@@ -130,6 +130,10 @@ describe('DSH adapter', () => {
     const events = [];
     for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
+    const continued = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) continued.push(event);
+    expect(continued.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
+    expect(transport.calls.filter((call) => (call.body as any)?.method === 'session/create')).toHaveLength(1);
     expect(transport.calls.some((call) => (call.body as any)?.method === 'session/selectModel')).toBe(true);
     expect(transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body).toMatchObject({
       payload: { args: { request: { afterSeq: 0, timeoutMs: 30_000 } } },
