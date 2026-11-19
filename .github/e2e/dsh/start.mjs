@@ -4,10 +4,14 @@ import http from 'node:http';
 
 const tokenDirectory = '/tmp/dsh-e2e';
 mkdirSync(tokenDirectory, { recursive: true });
-const child = spawn('dsh', ['web', '--host', '127.0.0.1', '--port', '18791', '--no-open'], {
-  env: { ...process.env, DSH_HOME: '/tmp/dsh-home' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const child = spawn(
+  'dsh',
+  ['web', '--host', '127.0.0.1', '--port', '18791', '--no-open', '--patch', '/tmp/dsh-e2e/patch.yml'],
+  {
+    env: { ...process.env, DSH_HOME: '/tmp/dsh-home' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
+);
 let output = '';
 let tokenWritten = false;
 

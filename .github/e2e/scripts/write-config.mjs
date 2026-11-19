@@ -17,6 +17,7 @@ const containerBaseUrl = process.env.OPENAI_BASE_URL.replace(
 );
 const output = process.env.E2E_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/openclaw.json');
 const hermesOutput = process.env.E2E_HERMES_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/hermes-config.yaml');
+const dshPatchOutput = process.env.E2E_DSH_PATCH_OUTPUT ?? resolve('.github/e2e/generated/dsh/patch.yml');
 const config = {
   gateway: {
     mode: 'local',
@@ -82,6 +83,27 @@ const hermesConfig = [
 ].join('\n');
 writeFileSync(hermesOutput, hermesConfig, { mode: 0o644 });
 chmodSync(hermesOutput, 0o644);
+const dshPatch = [
+  "- name: '@deepseek-ai/dsh-llm-pi-ai'",
+  '  config:',
+  '    providers:',
+  '      openai:',
+  '        apiKeyEnv: OPENAI_API_KEY',
+  '        api: openai-completions',
+  `        baseURL: ${JSON.stringify(containerBaseUrl)}`,
+  '        models:',
+  `          - id: ${JSON.stringify(modelId)}`,
+  `            name: ${JSON.stringify(modelId)}`,
+  '            contextWindow: 128000',
+  '            reasoningEfforts:',
+  '              low: low',
+  '              high: high',
+  '              max: max',
+  '',
+].join('\n');
+mkdirSync(dirname(dshPatchOutput), { recursive: true });
+writeFileSync(dshPatchOutput, dshPatch, { mode: 0o644 });
+chmodSync(dshPatchOutput, 0o644);
 if (process.env.GITHUB_ENV) {
   appendFileSync(process.env.GITHUB_ENV, `E2E_CONTAINER_OPENAI_BASE_URL=${containerBaseUrl}\n`);
 }
