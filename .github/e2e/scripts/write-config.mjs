@@ -16,6 +16,7 @@ const containerBaseUrl = process.env.OPENAI_BASE_URL.replace(
   '$1host.docker.internal',
 );
 const output = process.env.E2E_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/openclaw.json');
+const hermesOutput = process.env.E2E_HERMES_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/hermes-config.yaml');
 const config = {
   gateway: {
     mode: 'local',
@@ -68,6 +69,16 @@ const config = {
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o644 });
 chmodSync(output, 0o644);
+const hermesConfig = [
+  'model:',
+  `  default: ${JSON.stringify(modelId)}`,
+  '  provider: custom',
+  `  base_url: ${JSON.stringify(containerBaseUrl)}`,
+  '  key_env: OPENAI_API_KEY',
+  '',
+].join('\n');
+writeFileSync(hermesOutput, hermesConfig, { mode: 0o644 });
+chmodSync(hermesOutput, 0o644);
 if (process.env.GITHUB_ENV) {
   appendFileSync(process.env.GITHUB_ENV, `E2E_CONTAINER_OPENAI_BASE_URL=${containerBaseUrl}\n`);
 }

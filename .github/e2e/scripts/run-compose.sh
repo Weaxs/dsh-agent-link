@@ -99,12 +99,12 @@ EOF
     fi
     export TS_SOCKET="${RUNNER_TEMP:-/tmp}/headscale-e2e.sock"
     export E2E_TAILSCALE_SUDO=1
-    sudo tailscaled --tun=agentlink-e2e --netfilter-mode=off --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
+    sudo tailscaled --tun=agentlink-e2e --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
     for _ in {1..30}; do
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
+    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --netfilter-mode=off --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
     ;;
 esac
 

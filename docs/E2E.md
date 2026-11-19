@@ -42,7 +42,7 @@ Hermes receives:
 
 - `OPENAI_BASE_URL`
 - `OPENAI_API_KEY`
-- `HERMES_MODEL=$OPENAI_MODEL_NAME`
+- a generated `config.yaml` with `model.provider: custom`, `model.default`, `base_url`, and `key_env: OPENAI_API_KEY`
 - `API_SERVER_ENABLED=true`
 - `API_SERVER_KEY=$HERMES_API_KEY`
 

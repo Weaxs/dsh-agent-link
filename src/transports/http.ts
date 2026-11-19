@@ -35,19 +35,20 @@ export class NodeHttpTransport implements Transport {
     const host = this.kind === 'ssh' ? '127.0.0.1' : (this.config.host ?? '127.0.0.1');
     const secure = this.kind !== 'ssh' && this.config.tls === true;
     const factory = this.kind === 'ssh' ? () => openSshSocket(this.config) : undefined;
+    const customAgent = factory ? new http.Agent() : undefined;
+    if (customAgent && factory) customAgent.createConnection = factory as unknown as () => Socket;
     const options: RequestOptions = {
       protocol: secure ? 'https:' : 'http:',
       host,
       port: this.config.port,
       method: input.method ?? 'GET',
       path: input.path,
-      agent: false,
+      agent: customAgent ?? false,
       headers: {
         Accept: 'application/json, text/event-stream',
         ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': String(payload.length) } : {}),
         ...input.headers,
       },
-      ...(factory ? { createConnection: factory as unknown as () => Socket } : {}),
     };
     const driver = secure ? https : http;
     return new Promise<IncomingMessage>((resolve, reject) => {
@@ -69,7 +70,10 @@ export class NodeHttpTransport implements Transport {
       const abort = () => request.destroy(new Error('request aborted'));
       if (signal?.aborted) request.destroy(new Error('request aborted'));
       else signal?.addEventListener('abort', abort, { once: true });
-      responseCleanup(request, () => signal?.removeEventListener('abort', abort));
+      responseCleanup(request, () => {
+        signal?.removeEventListener('abort', abort);
+        customAgent?.destroy();
+      });
       request.end(payload);
     });
   }
