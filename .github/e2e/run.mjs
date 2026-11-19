@@ -35,6 +35,7 @@ function agentConfig(kind) {
 
 async function verify(kind) {
   const config = agentConfig(kind);
+  if (kind === 'dsh') process.env.AGENT_LINK_DEBUG_DSH = '1';
   const manager = new AgentManager([config], timeoutMs);
   const marker = `AL-${randomUUID().slice(0, 8).toUpperCase()}`;
   const startedAt = Date.now();

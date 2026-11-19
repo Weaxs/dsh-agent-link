@@ -84,6 +84,9 @@ export class DshAdapter implements AgentAdapter {
           },
           signal,
         );
+        if (process.env.AGENT_LINK_DEBUG_DSH === '1' && waited.reason !== 'timeout') {
+          console.error(`[dsh:${this.id}] session/wait ${JSON.stringify(waited)}`);
+        }
         const records = waited.output?.records ?? [];
         for (const record of records) {
           const text = assistantText(record);
