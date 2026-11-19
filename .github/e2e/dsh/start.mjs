@@ -1,9 +1,21 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 
 const tokenDirectory = '/tmp/dsh-e2e';
 mkdirSync(tokenDirectory, { recursive: true });
+const inspection = spawnSync('dsh', ['--profile', 'web', '--patch', `${tokenDirectory}/patch.yml`, '--dump-config'], {
+  encoding: 'utf8',
+  maxBuffer: 32 * 1024 * 1024,
+});
+if (inspection.status === 0) {
+  const lines = inspection.stdout
+    .split('\n')
+    .filter((line) => /dsh-llm-pi-ai|openai|baseURL|apiKeyEnv|models:|glm-|reasoningEfforts|providers:/i.test(line));
+  console.log(`DSH provider patch:\n${lines.join('\n')}`);
+} else {
+  console.error(`DSH config inspection failed: ${inspection.stderr}`);
+}
 const child = spawn(
   'dsh',
   ['--profile', 'web', '--patch', '/tmp/dsh-e2e/patch.yml', '--host', '127.0.0.1', '--port', '18791', '--no-open'],

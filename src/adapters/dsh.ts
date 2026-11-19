@@ -22,10 +22,6 @@ export class DshAdapter implements AgentAdapter {
     return { ok: true, sessions: Array.isArray(value.items) ? value.items.length : 0 };
   }
 
-  async catalog(signal?: AbortSignal): Promise<Record<string, any>> {
-    return this.rpc('catalog', {}, signal);
-  }
-
   async listSessions(signal?: AbortSignal): Promise<AgentSession[]> {
     const value = await this.rpc('list', {}, signal);
     return (value.items ?? [])
@@ -147,9 +143,7 @@ export class DshAdapter implements AgentAdapter {
         type: 'client-request',
         rpcId: randomUUID(),
         method: `session/${method}`,
-        payload: {
-          args: method === 'list' ? { _request: args } : method === 'catalog' ? args : { request: args },
-        },
+        payload: { args: method === 'list' ? { _request: args } : { request: args } },
       },
       signal,
     });
