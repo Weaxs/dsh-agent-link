@@ -1,0 +1,34 @@
+{
+  "name": "@weaxs/dsh-agent-link",
+  "version": "0.0.1",
+  "description": "DeepSeek Harness (dsh) plugin that links dsh with Hermes, OpenClaw and other agents over Tailscale, SSH or local transports — no third-party relay. Placeholder release; under development.",
+  "type": "module",
+  "files": [
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "hermes",
+    "openclaw",
+    "agent",
+    "multi-agent",
+    "tailscale",
+    "ssh"
+  ],
+  "homepage": "https://github.com/Weaxs/dsh-agent-link#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Weaxs/dsh-agent-link.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Weaxs/dsh-agent-link/issues"
+  },
+  "author": "Weaxs",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}
