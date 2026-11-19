@@ -143,7 +143,7 @@ export class DshAdapter implements AgentAdapter {
         type: 'client-request',
         rpcId: randomUUID(),
         method: `session/${method}`,
-        payload: { args },
+        payload: { args: method === 'list' ? { _request: args } : args },
       },
       signal,
     });

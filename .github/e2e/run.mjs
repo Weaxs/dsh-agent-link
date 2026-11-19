@@ -40,7 +40,20 @@ async function verify(kind) {
   const startedAt = Date.now();
   try {
     console.log(`[e2e] ${label}/${kind}: health check`);
-    await manager.adapter(config.id).health();
+    const deadline = Date.now() + 45_000;
+    let waitingForPairing = false;
+    while (true) {
+      try {
+        await manager.adapter(config.id).health();
+        break;
+      } catch (error) {
+        const message = String(error?.message ?? error);
+        if (!/pairing|not approved|not-paired/i.test(message) || Date.now() >= deadline) throw error;
+        if (!waitingForPairing) console.log(`[e2e] ${label}/${kind}: waiting for OpenClaw device approval`);
+        waitingForPairing = true;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
     console.log(`[e2e] ${label}/${kind}: health check passed; starting model task`);
     const first = manager.start(
       config.id,

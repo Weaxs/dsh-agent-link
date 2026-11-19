@@ -19,6 +19,7 @@ class FakeTransport implements Transport {
     const args = body.payload.args;
     switch (body.method) {
       case 'session/list':
+        expect(args).toEqual({ _request: {} });
         return ok({ items: [{ sessionId: 'dsh-session-1', title: 'Remote' }] });
       case 'session/create':
         return ok({ sessionId: args.sessionId, agentPreset: 'default' });

@@ -126,15 +126,25 @@ esac
 "${compose[@]}" up -d --wait
 
 if [[ "$mode" == ssh ]]; then
-  for alias in "$target-e2e"; do
-    ssh -F "$E2E_SSH_CONFIG" -T -o BatchMode=yes -o ConnectTimeout=10 "$alias" true
+  ssh_ready=false
+  for _ in {1..30}; do
+    if ssh -F "$E2E_SSH_CONFIG" -T -o BatchMode=yes -o ConnectTimeout=10 "$target-e2e" true; then
+      ssh_ready=true
+      break
+    fi
+    sleep 2
   done
+  if [[ "$ssh_ready" != true ]]; then echo 'SSH login did not become ready' >&2; exit 1; fi
 fi
 
 if [[ "$mode" == tailscale || "$mode" == headscale ]]; then
   connected=false
   for _ in {1..45}; do
-    if eval "$(node .github/e2e/scripts/tailscale-env.mjs)"; then connected=true; break; fi
+    if tailscale_exports="$(node .github/e2e/scripts/tailscale-env.mjs)"; then
+      eval "$tailscale_exports"
+      connected=true
+      break
+    fi
     sleep 2
   done
   if [[ "$connected" != true ]]; then echo 'Tailscale peers did not become available' >&2; exit 1; fi
