@@ -90,16 +90,21 @@ EOF
     export HEADSCALE_AUTHKEY="$(node -e "const s=process.argv[1];try{const j=JSON.parse(s);process.stdout.write(j.key??j.preAuthKey??j.authKey??s.trim())}catch{process.stdout.write(s.trim())}" "$key_json")"
     if [[ -z "$HEADSCALE_AUTHKEY" ]]; then echo 'Could not create a Headscale preauth key' >&2; exit 1; fi
     if ! command -v tailscaled >/dev/null; then
-      curl -fsSL https://tailscale.com/install.sh | sudo sh
+      tailscale_version="${TAILSCALE_E2E_VERSION:-1.104.7}"
+      tailscale_archive="${RUNNER_TEMP:-/tmp}/tailscale-e2e.tgz"
+      curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${tailscale_version}_amd64.tgz" -o "$tailscale_archive"
+      tar -xzf "$tailscale_archive" -C "${RUNNER_TEMP:-/tmp}"
+      sudo install -m 0755 "${RUNNER_TEMP:-/tmp}/tailscale_${tailscale_version}_amd64/tailscale" /usr/local/bin/tailscale
+      sudo install -m 0755 "${RUNNER_TEMP:-/tmp}/tailscale_${tailscale_version}_amd64/tailscaled" /usr/local/bin/tailscaled
     fi
     export TS_SOCKET="${RUNNER_TEMP:-/tmp}/headscale-e2e.sock"
     export E2E_TAILSCALE_SUDO=1
-    sudo tailscaled --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
+    sudo tailscaled --tun=agentlink-e2e --netfilter-mode=off --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
     for _ in {1..30}; do
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1
     done
-    sudo tailscale --socket="$TS_SOCKET" up --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
+    sudo tailscale --socket="$TS_SOCKET" up --timeout=60s --login-server=http://127.0.0.1:28080 --authkey="$HEADSCALE_AUTHKEY" --hostname="runner-e2e-${E2E_NODE_SUFFIX}" --accept-dns=true --reset
     ;;
 esac
 
@@ -114,4 +119,4 @@ if [[ "$mode" == tailscale || "$mode" == headscale ]]; then
   if [[ "$connected" != true ]]; then echo 'Tailscale peers did not become available' >&2; exit 1; fi
 fi
 
-node .github/e2e/run.mjs
+node .github/e2e/run.mjs 2>&1 | tee ".github/e2e/generated/adapter-$mode.log"

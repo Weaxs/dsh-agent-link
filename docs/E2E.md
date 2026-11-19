@@ -25,12 +25,12 @@ The second response verifies a real model invocation and remote session continui
 
 Configure these repository or organization Actions secrets:
 
-| Secret              | Used for                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------- |
-| `OPENAI_BASE_URL`   | OpenAI-compatible model API base URL, normally ending in `/v1`                                          |
-| `OPENAI_API_KEY`    | Credential for that model API                                                                           |
-| `OPENAI_MODEL_NAME` | Exact model ID used by both agents                                                                      |
-| `TAILSCALE_AUTHKEY` | **Reusable** Tailscale pre-auth key for the runner and two sidecars; required only by the Tailscale job |
+| Secret              | Used for                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OPENAI_BASE_URL`   | OpenAI-compatible model API base URL, normally ending in `/v1`                                                                                   |
+| `OPENAI_API_KEY`    | Credential for that model API                                                                                                                    |
+| `OPENAI_MODEL_NAME` | Exact model ID used by both agents                                                                                                               |
+| `TAILSCALE_AUTHKEY` | **Reusable** Tailscale pre-auth key (`tskey-auth-...`, not an API/OAuth key) for the runner and two sidecars; required only by the Tailscale job |
 
 Headscale needs no external account or secret. The job creates its own user and pre-auth keys.
 

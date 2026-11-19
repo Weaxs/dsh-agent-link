@@ -18,6 +18,7 @@ const containerBaseUrl = process.env.OPENAI_BASE_URL.replace(
 const output = process.env.E2E_CONFIG_OUTPUT ?? resolve('.github/e2e/generated/openclaw.json');
 const config = {
   gateway: {
+    mode: 'local',
     port: 18789,
     bind: 'lan',
     auth: { mode: 'token', token: process.env.OPENCLAW_GATEWAY_TOKEN },

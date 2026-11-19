@@ -46,11 +46,13 @@ jobs:
       - id: check
         name: Verify required secrets
         shell: bash
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
           model=false
           tailscale=false
           if [[ -n "$OPENAI_BASE_URL" && -n "$OPENAI_API_KEY" && -n "$OPENAI_MODEL_NAME" ]]; then model=true; fi
-          if [[ "$model" == true && -n "${{ secrets.TAILSCALE_AUTHKEY }}" ]]; then tailscale=true; fi
+          if [[ "$model" == true && "$TAILSCALE_AUTHKEY" == tskey-auth-* ]]; then tailscale=true; fi
           echo "model_configured=$model" >> "$GITHUB_OUTPUT"
           echo "tailscale_configured=$tailscale" >> "$GITHUB_OUTPUT"
           if [[ "$model" != true ]]; then
@@ -58,7 +60,7 @@ jobs:
             if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message Real E2E jobs will be skipped."; fi
           fi
           if [[ "$model" == true && "$tailscale" != true ]]; then
-            message="TAILSCALE_AUTHKEY is not configured; the Tailscale job will be skipped."
+            message="TAILSCALE_AUTHKEY must be a reusable pre-auth key (tskey-auth-...), not an API or OAuth key; the Tailscale job will be skipped."
             if [[ "${{ github.event_name }}" == workflow_dispatch && ( "${{ inputs.transport }}" == all || "${{ inputs.transport }}" == tailscale ) ]]; then echo "::error::$message"; exit 1; else echo "::warning::$message"; fi
           fi
 
@@ -80,7 +82,9 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: e2e-local-logs
-          path: .github/e2e/generated/e2e-local.log
+          path: |
+            .github/e2e/generated/e2e-local.log
+            .github/e2e/generated/adapter-local.log
 
   ssh:
     name: SSH / Hermes and OpenClaw
@@ -100,7 +104,9 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: e2e-ssh-logs
-          path: .github/e2e/generated/e2e-ssh.log
+          path: |
+            .github/e2e/generated/e2e-ssh.log
+            .github/e2e/generated/adapter-ssh.log
 
   tailscale:
     name: Tailscale / Hermes and OpenClaw
@@ -126,7 +132,9 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: e2e-tailscale-logs
-          path: .github/e2e/generated/e2e-tailscale.log
+          path: |
+            .github/e2e/generated/e2e-tailscale.log
+            .github/e2e/generated/adapter-tailscale.log
 
   headscale:
     name: Headscale / Hermes and OpenClaw
@@ -148,4 +156,5 @@ jobs:
           name: e2e-headscale-logs
           path: |
             .github/e2e/generated/e2e-headscale.log
+            .github/e2e/generated/adapter-headscale.log
             .github/e2e/generated/headscale-daemon.log
