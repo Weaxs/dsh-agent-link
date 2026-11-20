@@ -36,8 +36,10 @@ jobs:
           cd "$stage/package"
           npm pkg set name=dsh-knot
           sed -i 's|@weaxs/dsh-knot|dsh-knot|g' cordis.patch.yml
+          sed -i 's|"@weaxs/dsh-knot"|"dsh-knot"|g' dist/client.js
           grep -Eq 'name: ["'\'']dsh-knot["'\'']' cordis.patch.yml
           test -f dist/index.js
+          test -f dist/client.js
           test -f icon.svg
           test -f locale/en.json
           npm publish --access public --provenance

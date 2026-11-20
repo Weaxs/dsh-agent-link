@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "CommonJS",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "outDir": "dist/.client-tmp",
+    "rootDir": "src/client"
+  },
+  "include": ["src/client/index.ts"]
+}

@@ -65,6 +65,10 @@ export class AgentManager {
     return job;
   }
 
+  listJobs(): AgentJob[] {
+    return [...this.jobs.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((job) => ({ ...job }));
+  }
+
   async wait(id: string, signal?: AbortSignal): Promise<AgentJob> {
     const completion = this.completions.get(id);
     if (!completion) return this.get(id);

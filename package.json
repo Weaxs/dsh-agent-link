@@ -10,6 +10,7 @@
   },
   "exports": {
     ".": "./dist/index.js",
+    "./client": "./dist/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
@@ -26,8 +27,8 @@
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run --coverage",
@@ -65,6 +66,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
     }
   },
   "dependencies": {
@@ -73,7 +81,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.1.0 <5",
-    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.5 <0.3.0-0"
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.5 <0.3.0-0",
+    "@deepseek-ai/schemastery": ">=3.18.2 <4",
+    "react": "^18.3.1"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

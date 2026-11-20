@@ -13,6 +13,7 @@ class BodyTooLargeError extends Error {}
 
 export class McpServer {
   private server?: http.Server;
+  private boundAddress?: { host: string; port: number };
   private readonly allowed: Set<string>;
   private readonly token?: string;
 
@@ -44,7 +45,22 @@ export class McpServer {
       this.server!.listen(port, host, () => resolve());
     });
     const address = this.server.address() as AddressInfo;
-    return { host, port: address.port };
+    this.boundAddress = { host, port: address.port };
+    return this.boundAddress;
+  }
+
+  get address(): { host: string; port: number } | undefined {
+    return this.boundAddress;
+  }
+
+  listAllowed(): string[] {
+    return [...this.allowed];
+  }
+
+  setAllowed(sessionId: string, allow: boolean): void {
+    if (!sessionId) return;
+    if (allow) this.allowed.add(sessionId);
+    else this.allowed.delete(sessionId);
   }
 
   async close(): Promise<void> {
@@ -52,6 +68,7 @@ export class McpServer {
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server!.close(() => resolve()));
     this.server = undefined;
+    this.boundAddress = undefined;
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
