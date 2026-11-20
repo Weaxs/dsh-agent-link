@@ -13,7 +13,7 @@ afterEach(async () => {
   }
   server = undefined;
   delete process.env.OPENCLAW_GATEWAY_TOKEN;
-  delete process.env.DSH_AGENT_LINK_STATE_DIR;
+  delete process.env.DSH_KNOT_STATE_DIR;
 });
 
 describe('OpenClaw WebSocket wire protocol', () => {
@@ -74,7 +74,7 @@ describe('OpenClaw WebSocket wire protocol', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('expected TCP address');
     process.env.OPENCLAW_GATEWAY_TOKEN = 'token';
-    process.env.DSH_AGENT_LINK_STATE_DIR = mkdtempSync(join(tmpdir(), 'agent-link-wire-'));
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-wire-'));
     const adapter = new OpenClawAdapter('wire', {
       id: 'wire',
       kind: 'openclaw',

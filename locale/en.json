@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Agent Link",
+    "title": "DSH Knot",
     "description": "Connect dsh with Hermes, OpenClaw, and remote dsh instances through native gateways over SSH, Tailscale, or local transports. Run remote tasks, continue sessions, and share allow-listed dsh sessions through a read-only MCP endpoint."
   }
 }

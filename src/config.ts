@@ -75,7 +75,7 @@ export function secret(agent: AgentConfig, env: NodeJS.ProcessEnv = process.env)
       : agent.kind === 'dsh'
         ? 'DSH_GATEWAY_TOKEN'
         : agent.kind === 'acp'
-          ? 'AGENT_LINK_ACP_TOKEN'
+          ? 'DSH_KNOT_ACP_TOKEN'
           : 'HERMES_API_KEY';
   return agent.token ?? env[agent.tokenEnv ?? fallback];
 }

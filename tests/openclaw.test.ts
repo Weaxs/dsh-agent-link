@@ -44,13 +44,13 @@ class FakeGateway {
 
 afterEach(() => {
   delete process.env.OPENCLAW_GATEWAY_TOKEN;
-  delete process.env.DSH_AGENT_LINK_STATE_DIR;
+  delete process.env.DSH_KNOT_STATE_DIR;
 });
 
 describe('OpenClaw adapter', () => {
   it('pairs with a nonce signature and reuses the session', async () => {
     process.env.OPENCLAW_GATEWAY_TOKEN = 'token';
-    process.env.DSH_AGENT_LINK_STATE_DIR = mkdtempSync(join(tmpdir(), 'agent-link-'));
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-'));
     const gateway = new FakeGateway();
     const adapter = new OpenClawAdapter(
       'claw',
@@ -77,7 +77,7 @@ describe('OpenClaw adapter', () => {
 
 describe('device identity', () => {
   it('persists the key and signs the v2 claim', () => {
-    const root = mkdtempSync(join(tmpdir(), 'agent-link-id-'));
+    const root = mkdtempSync(join(tmpdir(), 'dsh-knot-id-'));
     const first = loadOrCreateIdentity('test', root);
     const second = loadOrCreateIdentity('test', root);
     expect(second.deviceId).toBe(first.deviceId);

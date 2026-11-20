@@ -1,4 +1,4 @@
-# Agent Link design
+# DSH Knot design
 
 Status: native and unified ACP v1 paths validated by real model-backed E2E across 24 transport/target/protocol combinations.
 
@@ -15,7 +15,7 @@ The current release intentionally does not write to local dsh sessions through M
 
 ```text
 ┌──────────────────────── local dsh ────────────────────────┐
-│ dsh-agent-link                                            │
+│ dsh-knot                                                  │
 │  adapters/    ACP provider + native compatibility drivers │
 │  transports/  ssh (default), direct, local                │
 │  tools/       agent_list / agent_ask / agent_continue / … │
@@ -55,7 +55,7 @@ interface AgentAdapter {
 
 The `acp` kind is the single provider for any ACP-compatible endpoint. The official TypeScript SDK negotiates stable protocol v1 and carries JSON-RPC messages over its WebSocket transport or standard NDJSON stdio. Stdio supports local subprocesses and ACP commands started through system OpenSSH. Session aliases are mapped to the actual ACP `sessionId`, so subsequent prompts continue the same conversation. The client uses the SDK's `ActiveSession` plus one event queue to preserve update/stop ordering without losing permission events to abandoned race waiters.
 
-The optional `dsh-agent-link-acp` bridge exposes `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission` over WebSocket or `AGENT_LINK_ACP_STDIO=1` stdio mode. Each bridge connection constructs a native adapter for Hermes, OpenClaw, or remote DSH and translates only that adapter's normalized events. A native ACP endpoint bypasses the bridge entirely. Non-loopback bridge listeners require `AGENT_LINK_ACP_TOKEN`; native gateway credentials and ACP bearer tokens remain separate.
+The optional `dsh-knot-acp` bridge exposes `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission` over WebSocket or `DSH_KNOT_ACP_STDIO=1` stdio mode. Each bridge connection constructs a native adapter for Hermes, OpenClaw, or remote DSH and translates only that adapter's normalized events. A native ACP endpoint bypasses the bridge entirely. Non-loopback bridge listeners require `DSH_KNOT_ACP_TOKEN`; native gateway credentials and ACP bearer tokens remain separate.
 
 ACP v2, A2A, and additional UI transports are intentionally outside the current scope.
 
@@ -82,11 +82,11 @@ The adapter opens a Gateway WebSocket with subprotocol `json`, negotiates protoc
 - a persistent Ed25519 device identity and a signature over the v2 claim,
 - the server nonce and the challenge's `ts` as `device.signedAt`.
 
-Device keys live under `$DSH_HOME/agent-link/devices` with mode `0600`. The device ID is the SHA-256 hash of the public key's raw x coordinate. The signing format is isolated in `openclaw-identity.ts` so upstream protocol changes have one review point.
+Device keys live under `$DSH_HOME/knot/devices` with mode `0600`. The device ID is the SHA-256 hash of the public key's raw x coordinate. The signing format is isolated in `openclaw-identity.ts` so upstream protocol changes have one review point.
 
 After pairing, the adapter uses `health`, `sessions.list`, `agent`, repeated `agent.wait` calls while a run is pending, and `sessions.abort` with the session `key`. RPC envelopes use `{ type: 'req', id, method, params }`, responses use `type: 'res'`, and streamed agent updates use `type: 'event'`. Reverse requests receive an explicit unsupported-method error instead of hanging.
 
-OpenClaw protocol behavior still needs validation against every target deployment version. `agent_link_doctor` is the first compatibility check.
+OpenClaw protocol behavior still needs validation against every target deployment version. `knot_doctor` is the first compatibility check.
 
 ### Remote DSH
 
@@ -131,7 +131,7 @@ For HTTP requests, one SSH process carries one request or SSE stream through a `
 - enforces the configured timeout,
 - optionally calls `Agent.followup()` on completion.
 
-The originating Agent's `followup` receives a marked `source.kind: agent-link` message. Missing follow-up support does not fail the remote job.
+The originating Agent's `followup` receives a marked `source.kind: knot` message. Missing follow-up support does not fail the remote job.
 
 ## Reverse MCP endpoint
 
@@ -147,7 +147,7 @@ Tools:
 | `dsh_session_read`  | Read a message-aligned history page through `sessionController.events`. | read       |
 | `dsh_session_watch` | Follow a session and return new frames plus a cursor.                   | read       |
 
-Authentication uses a bearer token from `token` or `tokenEnv` (default `DSH_AGENT_LINK_TOKEN`). Startup fails closed if MCP is enabled without a token. `allowSessions` defaults to an empty set.
+Authentication uses a bearer token from `token` or `tokenEnv` (default `DSH_KNOT_TOKEN`). Startup fails closed if MCP is enabled without a token. `allowSessions` defaults to an empty set.
 
 ### Reverse networking
 

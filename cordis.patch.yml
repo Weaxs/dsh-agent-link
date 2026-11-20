@@ -1,3 +1,3 @@
 - insert:
-    - id: agent-link
-      name: "@weaxs/dsh-agent-link"
+    - id: knot
+      name: "@weaxs/dsh-knot"

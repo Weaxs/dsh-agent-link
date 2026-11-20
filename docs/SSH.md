@@ -1,6 +1,6 @@
 # SSH setup guide
 
-SSH is the default transport for dsh-agent-link. This guide helps you make a remote agent host reachable without interactive prompts.
+SSH is the default transport for dsh-knot. This guide helps you make a remote agent host reachable without interactive prompts.
 
 ## How the plugin uses SSH
 
@@ -137,7 +137,7 @@ Host inner-box
 
 ## Troubleshooting
 
-`agent_link_doctor` recognizes these failures and returns a targeted hint.
+`knot_doctor` recognizes these failures and returns a targeted hint.
 
 | Error                                                   | Likely cause                                                        | Fix                                                                                                                             |
 | ------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |

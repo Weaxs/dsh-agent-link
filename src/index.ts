@@ -6,7 +6,7 @@ import type { SessionControllerLike } from './mcp/session-service.js';
 import { registerTools } from './tools.js';
 import type { PluginConfig } from './types.js';
 
-export const name = 'agent-link';
+export const name = 'knot';
 export const inject = ['tools'];
 
 export async function apply(ctx: Context, input: PluginConfig = {}): Promise<void> {

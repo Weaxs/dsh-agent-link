@@ -62,7 +62,7 @@ export function signClaim(
 
 function defaultRoot(): string {
   return join(
-    process.env.DSH_AGENT_LINK_STATE_DIR ?? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'agent-link'),
+    process.env.DSH_KNOT_STATE_DIR ?? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'knot'),
     'devices',
   );
 }

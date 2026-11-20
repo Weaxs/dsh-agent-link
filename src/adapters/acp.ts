@@ -202,7 +202,7 @@ export class AcpAdapter implements AgentAdapter {
   private async open(signal?: AbortSignal): Promise<void> {
     await this.closeProcess();
     const stream = this.config.acpTransport === 'stdio' ? this.openStdio() : this.openWebSocket();
-    const app = client({ name: 'dsh-agent-link' });
+    const app = client({ name: 'dsh-knot' });
     app.onRequest(methods.client.session.requestPermission, ({ params }) => {
       const requestId = params.toolCall.toolCallId;
       this.queues.get(params.sessionId)?.push({
@@ -230,7 +230,7 @@ export class AcpAdapter implements AgentAdapter {
     const initialized = await withTimeout(
       connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
-        clientInfo: { name: 'dsh-agent-link', version: VERSION },
+        clientInfo: { name: 'dsh-knot', version: VERSION },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       }),
       this.config.connectTimeoutMs ?? 30_000,

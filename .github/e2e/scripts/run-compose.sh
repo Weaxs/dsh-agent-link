@@ -13,7 +13,7 @@ if [[ "$E2E_PROTOCOL" == acp ]]; then export COMPOSE_PROFILES="$target,acp"; fi
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$root"
 mkdir -p .github/e2e/generated/dsh
-project="agent-link-e2e-$mode-$target-$E2E_PROTOCOL"
+project="dsh-knot-e2e-$mode-$target-$E2E_PROTOCOL"
 files=(-f .github/e2e/compose.yml -f ".github/e2e/compose.$mode.yml")
 compose=(docker compose -p "$project" "${files[@]}")
 
@@ -122,7 +122,7 @@ EOF
     fi
     export TS_SOCKET="${RUNNER_TEMP:-/tmp}/headscale-e2e.sock"
     export E2E_TAILSCALE_SUDO=1
-    sudo tailscaled --tun=agentlink-e2e --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
+    sudo tailscaled --tun=dshknot-e2e --state="${RUNNER_TEMP:-/tmp}/headscale-e2e.state" --socket="$TS_SOCKET" >"${RUNNER_TEMP:-/tmp}/headscale-e2e.log" 2>&1 &
     for _ in {1..30}; do
       if sudo tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then break; fi
       sleep 1

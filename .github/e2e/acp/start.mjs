@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-if (process.env.AGENT_LINK_NATIVE_KIND === 'dsh') {
-  const path = process.env.AGENT_LINK_DSH_TOKEN_FILE ?? '/tmp/dsh-e2e/token';
+if (process.env.DSH_KNOT_NATIVE_KIND === 'dsh') {
+  const path = process.env.DSH_KNOT_DSH_TOKEN_FILE ?? '/tmp/dsh-e2e/token';
   let token = '';
   for (let attempt = 0; attempt < 120 && !token; attempt += 1) {
     try {

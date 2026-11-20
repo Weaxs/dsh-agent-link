@@ -46,10 +46,10 @@ describe('plugin entry, tools and doctor', () => {
       'agent_ask',
       'agent_cancel',
       'agent_continue',
-      'agent_link_doctor',
       'agent_list',
       'agent_respond',
       'agent_status',
+      'knot_doctor',
     ]);
 
     const controller = new AbortController();

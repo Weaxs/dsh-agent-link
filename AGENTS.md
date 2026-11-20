@@ -1,4 +1,4 @@
-# dsh-agent-link — Agent Guidelines
+# dsh-knot — Agent Guidelines
 
 Read this file and the relevant design doc before changing code.
 
@@ -13,7 +13,7 @@ Read the authoritative doc before modifying its subsystem; keep docs minimal wit
 
 ## Architecture & ownership
 
-`dsh-agent-link` connects DeepSeek Harness (dsh) with Hermes, OpenClaw, and remote dsh instances via ACP v1 or native gateway interfaces, and exports allow-listed local dsh sessions over a read-only MCP listener.
+`dsh-knot` connects DeepSeek Harness (dsh) with Hermes, OpenClaw, and remote dsh instances via ACP v1 or native gateway interfaces, and exports allow-listed local dsh sessions over a read-only MCP listener.
 
 Keep module boundaries strict — never mix protocol logic into transports or transport branches into adapters:
 
@@ -39,16 +39,16 @@ Prefer the shared ACP provider for compatible platforms; a new native-only platf
 1. **No relays**: Never introduce a hosted relay, cloud broker, or mandatory remote plugin without an explicit user request.
 2. **Deny-by-default MCP**: Only explicitly allow-listed dsh sessions are exposed; an empty `allowSessions` shares nothing. Check allow-list before reading session data.
 3. **Read-only MCP**: MCP remains read-only until a separate write-token, per-session write permission, origin marker, and loop-prevention design is implemented.
-4. **Fail closed & loopback/tailnet only**: MCP fails closed without a bearer token and refuses `0.0.0.0` / `::`. Non-loopback ACP bridges require `AGENT_LINK_ACP_TOKEN`. Compare bearer tokens in constant time (`verifyBearerToken`).
+4. **Fail closed & loopback/tailnet only**: MCP fails closed without a bearer token and refuses `0.0.0.0` / `::`. Non-loopback ACP bridges require `DSH_KNOT_ACP_TOKEN`. Compare bearer tokens in constant time (`verifyBearerToken`).
 5. **No secret leakage**: Tokens, cookies, private keys, full remote configs, and session contents are never logged. Redact recursively (with circular-reference protection) before returning MCP payloads.
 6. **System OpenSSH only**: Invoke `ssh` via `execFile`/`spawn` without a shell, always with `BatchMode=yes`, `ConnectTimeout`, `ServerAliveInterval`/`ServerAliveCountMax`, and `ExitOnForwardFailure=yes`. Never auto-accept unknown host keys, weaken global algorithms, or edit `~/.ssh/config`.
 7. **Honest errors & approvals**: Surface gateway failures as structured errors; never fabricate success or hide partial output. Surface remote approvals to the user; never auto-approve.
 8. **Normalized events**: Adapter-specific payloads stop at `src/adapters/`. Tools and jobs consume normalized `AgentEvent` only.
-9. **Package parity**: `@weaxs/dsh-agent-link` and `dsh-agent-link` carry identical behavior; `cordis.patch.yml` must name the package being published.
+9. **Package parity**: `@weaxs/dsh-knot` and `dsh-knot` carry identical behavior; `cordis.patch.yml` must name the package being published.
 
 ## dsh integration rules
 
-- Register tools via `defineTool` from `@deepseek-ai/dsh-tools`. Keep names `agent_list`, `agent_ask`, `agent_continue`, `agent_status`, `agent_cancel`, `agent_respond`, and `agent_link_doctor` unless a deliberate migration is designed.
+- Register tools via `defineTool` from `@deepseek-ai/dsh-tools`. Keep names `agent_list`, `agent_ask`, `agent_continue`, `agent_status`, `agent_cancel`, `agent_respond`, and `knot_doctor` unless a deliberate migration is designed.
 - Keep tool output JSON-serializable and rendered as a single text block containing that JSON.
 - Forward `exec.signal` into all network calls, waits, doctor checks, and remote cancellations.
 - Call `Agent.followup()` only when present; notification failures must never fail a remote job.

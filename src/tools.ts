@@ -12,7 +12,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
   ctx.tools.register(
     defineTool({
       name: 'agent_list',
-      description: 'List remote Hermes, OpenClaw, and DSH agents configured through dsh-agent-link.',
+      description: 'List remote Hermes, OpenClaw, and DSH agents configured through dsh-knot.',
       parameters: { health: { type: 'boolean', description: 'Also probe every agent gateway.' } },
       output,
       async execute(args, exec) {
@@ -114,7 +114,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
 
   ctx.tools.register(
     defineTool({
-      name: 'agent_link_doctor',
+      name: 'knot_doctor',
       description: 'Check transport, SSH, gateway reachability and protocol health for configured agents.',
       parameters: { agent: { type: 'string', description: 'Check one agent id; omit to check all.' } },
       output,
@@ -135,7 +135,7 @@ function notifyAgent(exec: { agent?: unknown }, job: unknown): void {
   agent.followup({
     role: 'user',
     content: [{ type: 'text', text: `Remote agent job update:\n${JSON.stringify(job)}` }],
-    source: { kind: 'agent-link' },
+    source: { kind: 'knot' },
   });
 }
 

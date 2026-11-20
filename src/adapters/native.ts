@@ -14,7 +14,7 @@ export function createNativeAdapter(config: AgentConfig): AgentAdapter {
 export function createNativeSessionId(config: AgentConfig): string {
   if (config.kind === 'hermes') return `dsh_${randomUUID()}`;
   if (config.kind === 'openclaw') {
-    return `agent:${config.openclawAgentId ?? 'main'}:dsh-agent-link:${randomUUID()}`;
+    return `agent:${config.openclawAgentId ?? 'main'}:dsh-knot:${randomUUID()}`;
   }
   return randomUUID();
 }

@@ -57,7 +57,7 @@ describe('read-only MCP endpoint', () => {
 
   it('initializes and lists only allow-listed sessions', async () => {
     await start();
-    expect((await rpc('initialize', { protocolVersion: '2025-03-26' })).result.serverInfo.name).toBe('dsh-agent-link');
+    expect((await rpc('initialize', { protocolVersion: '2025-03-26' })).result.serverInfo.name).toBe('dsh-knot');
     const tools = await rpc('tools/list');
     expect(tools.result.tools.map((tool: any) => tool.name)).toContain('dsh_session_watch');
     const result = await rpc('tools/call', { name: 'dsh_sessions_list', arguments: {} });

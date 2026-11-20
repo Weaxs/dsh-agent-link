@@ -54,9 +54,9 @@ export class AcpBridge {
 
   async start(options: AcpBridgeOptions = {}): Promise<{ host: string; port: number }> {
     const host = options.host ?? '127.0.0.1';
-    const token = options.token ?? process.env.AGENT_LINK_ACP_TOKEN;
+    const token = options.token ?? process.env.DSH_KNOT_ACP_TOKEN;
     if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !token) {
-      throw new Error('AGENT_LINK_ACP_TOKEN is required when the ACP bridge is not loopback-only');
+      throw new Error('DSH_KNOT_ACP_TOKEN is required when the ACP bridge is not loopback-only');
     }
     const acpServer = new AcpServer({ createAgent: () => createAcpAgent(this.config, this.factory(this.config)) });
     const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 });
@@ -112,7 +112,7 @@ export class AcpBridge {
 export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): AgentApp {
   const cancelled = new Set<string>();
   const sessionCwds = new Map<string, string>();
-  const app = agent({ name: 'dsh-agent-link-acp-bridge' });
+  const app = agent({ name: 'dsh-knot-acp-bridge' });
   app.onConnect((connection: AgentConnection) => {
     void connection.closed.then(() => adapter.close());
   });
@@ -120,7 +120,7 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
     await adapter.health(signal);
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentInfo: { name: 'dsh-agent-link-acp-bridge', version: VERSION },
+      agentInfo: { name: 'dsh-knot-acp-bridge', version: VERSION },
       agentCapabilities: {
         loadSession: false,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },

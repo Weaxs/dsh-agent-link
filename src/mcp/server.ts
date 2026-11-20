@@ -21,13 +21,13 @@ export class McpServer {
     private readonly sessions: SessionControllerLike,
   ) {
     this.allowed = new Set(config.allowSessions ?? []);
-    this.token = config.token ?? process.env[config.tokenEnv ?? 'DSH_AGENT_LINK_TOKEN'];
+    this.token = config.token ?? process.env[config.tokenEnv ?? 'DSH_KNOT_TOKEN'];
   }
 
   async start(): Promise<{ host: string; port: number }> {
     if (this.server) throw new Error('MCP server is already running');
     if (!this.token)
-      throw new Error('MCP is enabled but no bearer token is configured (tokenEnv defaults to DSH_AGENT_LINK_TOKEN)');
+      throw new Error('MCP is enabled but no bearer token is configured (tokenEnv defaults to DSH_KNOT_TOKEN)');
     const host = this.config.host ?? '127.0.0.1';
     if (host === '0.0.0.0' || host === '::') {
       throw new Error('MCP server must bind to loopback or a specific trusted address, never 0.0.0.0 or ::');
@@ -96,7 +96,7 @@ export class McpServer {
           protocolVersion:
             typeof message.params?.protocolVersion === 'string' ? message.params.protocolVersion : PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'dsh-agent-link', version: VERSION },
+          serverInfo: { name: 'dsh-knot', version: VERSION },
           instructions: 'Only sessions explicitly allow-listed by the local user are visible. All output is redacted.',
         });
       if (message.method === 'notifications/initialized' || message.method.startsWith('notifications/'))
