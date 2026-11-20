@@ -156,16 +156,20 @@ describe('web UI host routes & schemastery Config', () => {
     expect(manager.getConfig('hermes-second')?.tls).toBe(true);
     expect(manager.getConfig('hermes-second')?.acpArgs).toEqual(['--flag']);
 
-    // Clearing token via clearToken: true removes the stored token
+    // Clearing token via clearToken: true removes the stored token, and switching transport strips stale fields
     const cleared = await post(WEB_ROUTES.agentSave, {
       id: 'hermes-second',
       kind: 'hermes',
-      transport: 'direct',
+      transport: 'ssh',
+      ssh: 'gpu-2',
       host: '100.64.0.9',
+      tls: true,
       clearToken: true,
     });
     expect(cleared.ok).toBe(true);
     expect(manager.getConfig('hermes-second')?.token).toBeUndefined();
+    expect(manager.getConfig('hermes-second')?.host).toBeUndefined();
+    expect(manager.getConfig('hermes-second')?.tls).toBeUndefined();
 
     // Deleting an agent records a tombstone in deletedIds and aborts in-flight jobs
     const activeJob = manager.start('hermes-local', 'in-flight', undefined);

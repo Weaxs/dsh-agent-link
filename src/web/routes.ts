@@ -203,14 +203,19 @@ export function registerWebRoutes(
           kind,
           transport,
           ssh:
-            typeof body.ssh === 'string'
-              ? body.ssh.trim() || undefined
-              : transport === 'ssh'
-                ? existing?.ssh
-                : undefined,
-          host: typeof body.host === 'string' ? body.host.trim() || undefined : existing?.host,
+            transport === 'ssh'
+              ? typeof body.ssh === 'string'
+                ? body.ssh.trim() || undefined
+                : existing?.ssh
+              : undefined,
+          host:
+            transport !== 'ssh'
+              ? typeof body.host === 'string'
+                ? body.host.trim() || undefined
+                : existing?.host
+              : undefined,
           port: body.port !== undefined && body.port !== '' ? Number(body.port) : undefined,
-          tls: resolvedTls ? true : undefined,
+          tls: transport === 'direct' && resolvedTls ? true : undefined,
           token: resolvedToken,
           model: typeof body.model === 'string' ? body.model.trim() || undefined : existing?.model,
           acpTransport,

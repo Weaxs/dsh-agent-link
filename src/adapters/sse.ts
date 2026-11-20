@@ -14,7 +14,7 @@ export async function* readSse(response: IncomingMessage): AsyncIterable<SseEven
   let buffer = '';
   for await (const chunk of response) {
     const piece = typeof chunk === 'string' ? chunk : decoder.write(chunk);
-    buffer += piece.replaceAll('\r\n', '\n');
+    buffer = (buffer + piece).replaceAll('\r\n', '\n');
     if (buffer.length > MAX_SSE_BUFFER) throw new Error(`SSE buffer exceeds ${MAX_SSE_BUFFER} bytes`);
     let boundary = buffer.indexOf('\n\n');
     while (boundary >= 0) {
@@ -25,7 +25,7 @@ export async function* readSse(response: IncomingMessage): AsyncIterable<SseEven
       boundary = buffer.indexOf('\n\n');
     }
   }
-  buffer += decoder.end().replaceAll('\r\n', '\n');
+  buffer = (buffer + decoder.end()).replaceAll('\r\n', '\n');
   if (buffer.trim()) {
     const parsed = parseFrame(buffer);
     if (parsed) yield parsed;

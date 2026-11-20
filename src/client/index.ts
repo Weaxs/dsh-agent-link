@@ -138,6 +138,7 @@ const DICTS: Record<string, Record<string, string>> = {
     addAgent: '+ 添加助手',
     editAgent: '编辑',
     deleteAgent: '删除',
+    confirmDeleteAgent: '确认删除?',
     saveAgent: '保存',
     cancelBtn: '取消',
     modalAddTitle: '添加远端助手',
@@ -205,6 +206,7 @@ const DICTS: Record<string, Record<string, string>> = {
     addAgent: '+ Add Agent',
     editAgent: 'Edit',
     deleteAgent: 'Remove',
+    confirmDeleteAgent: 'Confirm?',
     saveAgent: 'Save',
     cancelBtn: 'Cancel',
     modalAddTitle: 'Add Remote Agent',
@@ -338,6 +340,7 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const [toast, setToast] = React.useState<string | null>(null);
     const [form, setForm] = React.useState<AgentFormState | null>(null);
     const [saving, setSaving] = React.useState(false);
+    const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
     const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const historySeq = React.useRef(0);
 
@@ -514,6 +517,11 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     };
 
     const removeAgent = async (id: string) => {
+      if (confirmDeleteId !== id) {
+        setConfirmDeleteId(id);
+        return;
+      }
+      setConfirmDeleteId(null);
       try {
         await apiPost(ctx, '/api/dsh-knot/agent-delete', { id });
         if (historyAgent === id) {
@@ -824,8 +832,12 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                         h('button', { className: 'dk-btn', onClick: () => openEditForm(agent) }, t('editAgent')),
                         h(
                           'button',
-                          { className: 'dk-btn dk-btn-danger', onClick: () => void removeAgent(agent.id) },
-                          t('deleteAgent'),
+                          {
+                            className: 'dk-btn dk-btn-danger',
+                            onClick: () => void removeAgent(agent.id),
+                            onBlur: () => setConfirmDeleteId((cur) => (cur === agent.id ? null : cur)),
+                          },
+                          confirmDeleteId === agent.id ? t('confirmDeleteAgent') : t('deleteAgent'),
                         ),
                         h(
                           'button',
@@ -1049,8 +1061,20 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                       {
                         className: 'dk-input',
                         value: form.kind,
-                        onChange: (e: { target: { value: string } }) =>
-                          setForm((cur) => (cur ? { ...cur, kind: e.target.value as AgentFormState['kind'] } : null)),
+                        onChange: (e: { target: { value: string } }) => {
+                          const nextKind = e.target.value as AgentFormState['kind'];
+                          const defaultPort = (k: AgentFormState['kind']) =>
+                            k === 'openclaw' ? '18789' : k === 'dsh' ? '18790' : k === 'acp' ? '18792' : '8642';
+                          setForm((cur) =>
+                            cur
+                              ? {
+                                  ...cur,
+                                  kind: nextKind,
+                                  port: cur.port === defaultPort(cur.kind) ? '' : cur.port,
+                                }
+                              : null,
+                          );
+                        },
                       },
                       h('option', { value: 'acp' }, 'ACP v1'),
                       h('option', { value: 'hermes' }, 'Hermes'),

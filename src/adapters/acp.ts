@@ -159,15 +159,19 @@ export class AcpAdapter implements AgentAdapter {
     }
     for (const queue of this.queues.values()) queue.finish();
     this.queues.clear();
-    for (const session of new Set(this.activeSessions.values())) session.dispose();
-    this.activeSessions.clear();
-    this.sessionIds.clear();
-    this.pumping.clear();
+    this.clearSessions();
     this.connection?.close();
     this.connection = undefined;
     this.connecting = undefined;
     await this.closeProcess();
     await this.transport.close();
+  }
+
+  private clearSessions(): void {
+    for (const session of new Set(this.activeSessions.values())) session.dispose();
+    this.activeSessions.clear();
+    this.sessionIds.clear();
+    this.pumping.clear();
   }
 
   private rememberSession(alias: string, actualId: string, active: ActiveSession): void {
@@ -229,6 +233,7 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   private async open(signal?: AbortSignal): Promise<void> {
+    this.clearSessions();
     await this.closeProcess();
     const stream = this.config.acpTransport === 'stdio' ? this.openStdio() : this.openWebSocket();
     const app = client({ name: 'dsh-knot' });
@@ -250,6 +255,7 @@ export class AcpAdapter implements AgentAdapter {
     const connection = app.connect(stream);
     this.connection = connection;
     connection.closed.then(() => {
+      if (this.connection === connection) this.clearSessions();
       for (const queue of this.queues.values()) queue.fail(new Error('ACP connection closed'));
       for (const [requestId, pending] of this.permissions) {
         pending.resolve({ outcome: { outcome: 'cancelled' } });
