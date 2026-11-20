@@ -37,6 +37,7 @@ export class AcpAdapter implements AgentAdapter {
   private readonly activeSessions = new Map<string, ActiveSession>();
   private readonly sessionIds = new Map<string, string>();
   private readonly permissions = new Map<string, PendingPermission>();
+  private readonly pumping = new Set<string>();
   private connection?: ClientConnection;
   private child?: ChildProcess;
   private connecting?: Promise<void>;
@@ -87,35 +88,19 @@ export class AcpAdapter implements AgentAdapter {
           stopWaitingOnCancel: true,
         });
         actualId = active.sessionId;
-        this.activeSessions.set(alias, active);
-        this.activeSessions.set(actualId, active);
-        this.sessionIds.set(alias, actualId);
-        this.sessionIds.set(actualId, actualId);
+        this.rememberSession(alias, actualId, active);
       } else {
         actualId = active.sessionId;
       }
       this.queues.set(actualId, queue);
       const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
       completion.catch((error) => {
-        queue.push({
+        this.queues.get(actualId)?.push({
           kind: 'native',
           value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
         });
       });
-      void (async () => {
-        try {
-          while (true) {
-            const value = await active.nextUpdate();
-            queue.push({ kind: 'acp', value });
-            if (value.kind === 'stop') break;
-          }
-        } catch (error) {
-          queue.push({
-            kind: 'native',
-            value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
-          });
-        }
-      })();
+      this.pumpUpdates(actualId, active);
       while (true) {
         const next = await queue.next(signal);
         if (next.done) throw new Error('ACP event stream ended before the prompt completed');
@@ -176,11 +161,55 @@ export class AcpAdapter implements AgentAdapter {
     this.queues.clear();
     for (const session of new Set(this.activeSessions.values())) session.dispose();
     this.activeSessions.clear();
+    this.sessionIds.clear();
+    this.pumping.clear();
     this.connection?.close();
     this.connection = undefined;
     this.connecting = undefined;
     await this.closeProcess();
     await this.transport.close();
+  }
+
+  private rememberSession(alias: string, actualId: string, active: ActiveSession): void {
+    this.activeSessions.delete(alias);
+    this.activeSessions.delete(actualId);
+    this.activeSessions.set(alias, active);
+    this.activeSessions.set(actualId, active);
+    this.sessionIds.delete(alias);
+    this.sessionIds.delete(actualId);
+    this.sessionIds.set(alias, actualId);
+    this.sessionIds.set(actualId, actualId);
+    while (this.activeSessions.size > 500) {
+      const oldestKey = this.activeSessions.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evicted = this.activeSessions.get(oldestKey);
+      this.activeSessions.delete(oldestKey);
+      this.sessionIds.delete(oldestKey);
+      if (evicted && ![...this.activeSessions.values()].includes(evicted)) {
+        evicted.dispose();
+      }
+    }
+  }
+
+  private pumpUpdates(actualId: string, active: ActiveSession): void {
+    if (this.pumping.has(actualId)) return;
+    this.pumping.add(actualId);
+    void (async () => {
+      try {
+        while (this.activeSessions.get(actualId) === active) {
+          const value = await active.nextUpdate();
+          this.queues.get(actualId)?.push({ kind: 'acp', value });
+          if (value.kind === 'stop') break;
+        }
+      } catch (error) {
+        this.queues.get(actualId)?.push({
+          kind: 'native',
+          value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+        });
+      } finally {
+        this.pumping.delete(actualId);
+      }
+    })();
   }
 
   private async connect(signal?: AbortSignal): Promise<void> {

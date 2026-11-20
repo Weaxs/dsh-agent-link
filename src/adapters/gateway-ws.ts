@@ -7,6 +7,7 @@ interface Pending {
   resolve: (value: Record<string, any>) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
+  cleanup?: () => void;
 }
 
 export class GatewayWebSocket {
@@ -44,16 +45,34 @@ export class GatewayWebSocket {
       if (this.ws === ws) this.fail(new Error('Gateway WebSocket closed'));
     });
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Gateway WebSocket upgrade timed out')), this.timeoutMs);
-      ws.once('open', () => {
+      const cleanup = () => {
         clearTimeout(timer);
+        ws.off('open', onOpen);
+        ws.off('error', onError);
+        ws.off('close', onClose);
+      };
+      const onOpen = () => {
+        cleanup();
         this.connected = true;
         resolve();
-      });
-      ws.once('error', (error) => {
-        clearTimeout(timer);
+      };
+      const onError = (error: Error) => {
+        cleanup();
         reject(error);
-      });
+      };
+      const onClose = () => {
+        cleanup();
+        reject(new Error('Gateway WebSocket closed before handshake opened'));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        if (this.ws === ws) this.ws = undefined;
+        ws.terminate();
+        reject(new Error('Gateway WebSocket upgrade timed out'));
+      }, this.timeoutMs);
+      ws.on('open', onOpen);
+      ws.on('error', onError);
+      ws.on('close', onClose);
     });
   }
 
@@ -61,18 +80,32 @@ export class GatewayWebSocket {
     method: string,
     params: Record<string, unknown> = {},
     timeoutMs = this.timeoutMs,
+    signal?: AbortSignal,
   ): Promise<Record<string, any>> {
     if (!this.connected || !this.ws) return Promise.reject(new Error('Gateway is not connected'));
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('request aborted'));
     const id = randomUUID();
     return new Promise((resolve, reject) => {
+      let cleanup: (() => void) | undefined;
       const timer = setTimeout(() => {
+        cleanup?.();
         this.pending.delete(id);
         reject(new Error(`${method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      if (signal) {
+        const onAbort = () => {
+          clearTimeout(timer);
+          this.pending.delete(id);
+          reject(signal.reason ?? new Error('request aborted'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        cleanup = () => signal.removeEventListener('abort', onAbort);
+      }
+      this.pending.set(id, { resolve, reject, timer, cleanup });
       this.ws!.send(JSON.stringify({ type: 'req', id, method, params }), (error) => {
         if (error) {
           clearTimeout(timer);
+          cleanup?.();
           this.pending.delete(id);
           reject(error);
         }
@@ -91,6 +124,7 @@ export class GatewayWebSocket {
     this.events.finish();
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
+      pending.cleanup?.();
       pending.reject(new Error('Gateway connection closed'));
       this.pending.delete(id);
     }
@@ -111,6 +145,7 @@ export class GatewayWebSocket {
       const pending = this.pending.get(frame.id);
       if (pending) {
         clearTimeout(pending.timer);
+        pending.cleanup?.();
         this.pending.delete(frame.id);
         if (frame.ok === false)
           pending.reject(new Error(frame.error?.message ?? frame.error?.code ?? 'Gateway request failed'));
@@ -135,6 +170,7 @@ export class GatewayWebSocket {
     this.events.fail(error);
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
+      pending.cleanup?.();
       pending.reject(error);
       this.pending.delete(id);
     }

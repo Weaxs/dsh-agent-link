@@ -130,7 +130,13 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
   });
   app.onRequest(methods.agent.session.new, ({ params }) => {
     const sessionId = createNativeSessionId(config);
+    sessionCwds.delete(sessionId);
     sessionCwds.set(sessionId, params.cwd);
+    while (sessionCwds.size > 500) {
+      const oldest = sessionCwds.keys().next().value;
+      if (oldest === undefined) break;
+      sessionCwds.delete(oldest);
+    }
     cancelled.delete(sessionId);
     return { sessionId };
   });
@@ -147,6 +153,7 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
   });
   app.onRequest(methods.agent.session.prompt, async ({ params, client, signal }) => {
     const sessionId = params.sessionId;
+    cancelled.delete(sessionId);
     const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
     const toolIds = new Map<string, string>();
     let output = '';

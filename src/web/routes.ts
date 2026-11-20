@@ -5,7 +5,7 @@ import type { AgentManager } from '../manager.js';
 import type { McpServer } from '../mcp/server.js';
 import type { SessionControllerLike } from '../mcp/session-service.js';
 import { redact } from '../policy/redact.js';
-import { loadStoredAgents, saveStoredAgents } from '../store.js';
+import { loadStoredState, saveStoredState } from '../store.js';
 import type { AgentConfig } from '../types.js';
 import { VERSION } from '../version.js';
 
@@ -165,7 +165,10 @@ export function registerWebRoutes(
         const allow = Boolean(body.allow);
         if (!sessionId) return errorReply('sessionId is required', 400);
         mcp.setAllowed(sessionId, allow);
-        return jsonReply({ ok: true, value: { allowSessions: mcp.listAllowed() } });
+        const allowSessions = mcp.listAllowed();
+        const state = loadStoredState();
+        saveStoredState({ ...state, allowSessions });
+        return jsonReply({ ok: true, value: { allowSessions } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
       }
@@ -177,28 +180,52 @@ export function registerWebRoutes(
         const id = typeof body.id === 'string' ? body.id.trim() : '';
         const existing = id ? manager.getConfig(id) : undefined;
         const incomingToken = typeof body.token === 'string' ? body.token.trim() : '';
+        const clearToken = body.clearToken === true;
+        const kind = (body.kind ?? existing?.kind) as AgentConfig['kind'];
+        const transport = ((body.transport ?? existing?.transport) as AgentConfig['transport']) ?? 'ssh';
+        const resolvedToken = clearToken ? undefined : incomingToken || existing?.token;
+        const resolvedTls = typeof body.tls === 'boolean' ? body.tls : existing?.tls;
+        const acpTransport =
+          kind === 'acp'
+            ? body.acpTransport === 'stdio' || body.acpTransport === 'websocket'
+              ? body.acpTransport
+              : existing?.acpTransport
+            : undefined;
+        const acpCommand =
+          kind === 'acp' && acpTransport === 'stdio'
+            ? typeof body.acpCommand === 'string'
+              ? body.acpCommand.trim() || undefined
+              : existing?.acpCommand
+            : undefined;
         const candidate: AgentConfig = {
+          ...(existing ?? {}),
           id,
-          kind: body.kind as AgentConfig['kind'],
-          transport: (body.transport as AgentConfig['transport']) ?? 'ssh',
-          ...(typeof body.ssh === 'string' && body.ssh.trim() ? { ssh: body.ssh.trim() } : {}),
-          ...(typeof body.host === 'string' && body.host.trim() ? { host: body.host.trim() } : {}),
-          ...(body.port !== undefined && body.port !== '' ? { port: Number(body.port) } : {}),
-          ...(body.tls === true ? { tls: true } : {}),
-          ...(incomingToken ? { token: incomingToken } : existing?.token ? { token: existing.token } : {}),
-          ...(typeof body.model === 'string' && body.model.trim() ? { model: body.model.trim() } : {}),
-          ...(body.acpTransport === 'stdio' || body.acpTransport === 'websocket'
-            ? { acpTransport: body.acpTransport }
-            : {}),
-          ...(typeof body.acpCommand === 'string' && body.acpCommand.trim()
-            ? { acpCommand: body.acpCommand.trim() }
-            : {}),
+          kind,
+          transport,
+          ssh:
+            typeof body.ssh === 'string'
+              ? body.ssh.trim() || undefined
+              : transport === 'ssh'
+                ? existing?.ssh
+                : undefined,
+          host: typeof body.host === 'string' ? body.host.trim() || undefined : existing?.host,
+          port: body.port !== undefined && body.port !== '' ? Number(body.port) : undefined,
+          tls: resolvedTls ? true : undefined,
+          token: resolvedToken,
+          model: typeof body.model === 'string' ? body.model.trim() || undefined : existing?.model,
+          acpTransport,
+          acpCommand,
           ...(Array.isArray(body.acpArgs) ? { acpArgs: body.acpArgs.map(String) } : {}),
         };
+        for (const key of Object.keys(candidate) as Array<keyof AgentConfig>) {
+          if (candidate[key] === undefined) delete candidate[key];
+        }
         const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
-        const stored = loadStoredAgents().filter((item) => item.id !== normalized!.id);
-        stored.push(normalized!);
-        saveStoredAgents(stored);
+        const state = loadStoredState();
+        const agents = state.agents.filter((item) => item.id !== normalized!.id);
+        agents.push(normalized!);
+        const deletedIds = state.deletedIds.filter((item) => item !== normalized!.id);
+        saveStoredState({ ...state, agents, deletedIds });
         await manager.upsert(normalized!);
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
@@ -211,8 +238,10 @@ export function registerWebRoutes(
         const body = await parseBody(request);
         const id = typeof body.id === 'string' ? body.id.trim() : '';
         if (!id) return errorReply('id is required', 400);
-        const stored = loadStoredAgents().filter((item) => item.id !== id);
-        saveStoredAgents(stored);
+        const state = loadStoredState();
+        const agents = state.agents.filter((item) => item.id !== id);
+        const deletedIds = [...new Set([...state.deletedIds, id])];
+        saveStoredState({ ...state, agents, deletedIds });
         await manager.remove(id);
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {

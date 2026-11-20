@@ -69,8 +69,6 @@ export class OpenClawAdapter implements AgentAdapter {
     const runId = String(started.runId ?? started.run_id ?? started.id ?? '');
     const sessionKey = String(started.sessionKey ?? started.session_key ?? sessionId ?? '');
     if (!runId) throw new Error(`OpenClaw did not return a run id: ${JSON.stringify(started)}`);
-    let completed = this.gateway.request('agent.wait', { runId }, 1_800_000);
-    completed.catch(() => {});
     const waitAbort = new AbortController();
     const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
     if (signal?.aborted) onAbort();
@@ -79,6 +77,8 @@ export class OpenClawAdapter implements AgentAdapter {
       if (waitAbort.signal.aborted) resolve({ kind: 'aborted' });
       else waitAbort.signal.addEventListener('abort', () => resolve({ kind: 'aborted' }), { once: true });
     });
+    let completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);
+    completed.catch(() => {});
     let next = this.gateway.nextEvent(waitAbort.signal);
     next.catch(() => {});
     let output = '';
@@ -99,7 +99,7 @@ export class OpenClawAdapter implements AgentAdapter {
         }
         if (result.kind === 'done') {
           if (result.value.status === 'pending' || result.value.status === 'timeout') {
-            completed = this.gateway.request('agent.wait', { runId }, 1_800_000);
+            completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);
             completed.catch(() => {});
             continue;
           }
@@ -177,7 +177,10 @@ export class OpenClawAdapter implements AgentAdapter {
 
   private async handshake(): Promise<void> {
     const token = secret(this.config);
-    if (!token) throw new Error(`${this.id}: set tokenEnv (default OPENCLAW_GATEWAY_TOKEN) for the OpenClaw gateway`);
+    if (!token)
+      throw new Error(
+        `${this.id}: configure the agent token in DSH Knot UI (or tokenEnv / OPENCLAW_GATEWAY_TOKEN) for the OpenClaw gateway`,
+      );
     const host = this.transport.kind === 'ssh' ? '127.0.0.1' : (this.config.host ?? '127.0.0.1');
     const port = this.config.port ?? 18_789;
     const origin = this.config.origin ?? `http://${host}:${port}`;

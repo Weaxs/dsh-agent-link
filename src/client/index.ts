@@ -7,6 +7,7 @@ interface ReactModule {
   useState<T>(initial: T | (() => T)): [T, (next: T | ((prev: T) => T)) => void];
   useEffect(effect: () => undefined | (() => void), deps?: readonly unknown[]): void;
   useCallback<T extends (...args: never[]) => unknown>(fn: T, deps: readonly unknown[]): T;
+  useRef<T>(initial: T): { current: T };
 }
 
 interface ClientLocale {
@@ -38,6 +39,7 @@ interface AgentSummary {
   host?: string;
   ssh?: string;
   port?: number;
+  tls?: boolean;
   acpTransport?: 'websocket' | 'stdio';
   acpCommand?: string;
   model?: string;
@@ -46,12 +48,15 @@ interface AgentSummary {
 
 interface AgentFormState {
   editing: boolean;
+  hasToken: boolean;
+  clearToken: boolean;
   id: string;
   kind: 'hermes' | 'openclaw' | 'dsh' | 'acp';
   transport: 'ssh' | 'direct' | 'local';
   ssh: string;
   host: string;
   port: string;
+  tls: boolean;
   token: string;
   model: string;
   acpTransport: 'websocket' | 'stdio';
@@ -143,12 +148,15 @@ const DICTS: Record<string, Record<string, string>> = {
     fieldSsh: 'SSH 主机别名（来自 ~/.ssh/config）',
     fieldHost: '主机地址（IP 或 Tailscale 域名）',
     fieldPort: '端口（留空使用默认端口）',
+    fieldTls: '启用 TLS (HTTPS / WSS)',
     fieldToken: 'Token / API Key（独立保存，无需环境变量）',
     fieldTokenKeep: '留空则保留当前已保存的 Token',
+    fieldClearToken: '清空已保存的 Token',
     fieldModel: '默认模型（可选）',
     fieldAcpTransport: 'ACP 传输方式',
     fieldAcpCommand: 'ACP stdio 命令路径',
     tokenConfigured: '已配密钥',
+    savingAgent: '保存中…',
     savedAgentToast: '助手配置已保存并立即生效',
     deletedAgentToast: '已移除该助手',
     viewHistory: '看历史',
@@ -207,12 +215,15 @@ const DICTS: Record<string, Record<string, string>> = {
     fieldSsh: 'SSH host alias (from ~/.ssh/config)',
     fieldHost: 'Host (IP or Tailscale hostname)',
     fieldPort: 'Port (leave blank for default)',
+    fieldTls: 'Use TLS (HTTPS / WSS)',
     fieldToken: 'Token / API Key (stored per agent, 0600)',
     fieldTokenKeep: 'Leave blank to keep existing token',
+    fieldClearToken: 'Clear saved token',
     fieldModel: 'Model override (optional)',
     fieldAcpTransport: 'ACP Transport',
     fieldAcpCommand: 'ACP stdio command',
     tokenConfigured: 'Token set',
+    savingAgent: 'Saving…',
     savedAgentToast: 'Agent saved and activated',
     deletedAgentToast: 'Agent removed',
     viewHistory: 'History',
@@ -326,12 +337,25 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const [historyLimit, setHistoryLimit] = React.useState(6);
     const [toast, setToast] = React.useState<string | null>(null);
     const [form, setForm] = React.useState<AgentFormState | null>(null);
+    const [saving, setSaving] = React.useState(false);
+    const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const historySeq = React.useRef(0);
 
     const t = (key: string): string => DICTS[lang]?.[key] ?? DICTS.en?.[key] ?? key;
 
     const showToast = React.useCallback((message: string) => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
       setToast(message);
-      setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 2400);
+      toastTimer.current = setTimeout(() => {
+        toastTimer.current = null;
+        setToast(null);
+      }, 2400);
+    }, []);
+
+    React.useEffect(() => {
+      return () => {
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+      };
     }, []);
 
     const refreshState = React.useCallback(async () => {
@@ -374,21 +398,25 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     };
 
     const loadHistory = async (agentId: string) => {
+      const seq = ++historySeq.current;
       setHistoryAgent(agentId);
       setHistoryLimit(6);
       if (!agentId) {
         setHistoryItems([]);
+        setHistoryLoading(false);
         return;
       }
       setHistoryLoading(true);
       try {
         const result = await apiPost<{ sessions: RemoteSessionItem[] }>(ctx, '/api/dsh-knot/sessions', { agentId });
+        if (historySeq.current !== seq) return;
         setHistoryItems(result.sessions ?? []);
       } catch (err) {
+        if (historySeq.current !== seq) return;
         setHistoryItems([]);
         showToast(err instanceof Error ? err.message : String(err));
       } finally {
-        setHistoryLoading(false);
+        if (historySeq.current === seq) setHistoryLoading(false);
       }
     };
 
@@ -422,12 +450,15 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const openAddForm = () => {
       setForm({
         editing: false,
+        hasToken: false,
+        clearToken: false,
         id: '',
         kind: 'acp',
         transport: 'ssh',
         ssh: '',
         host: '127.0.0.1',
         port: '',
+        tls: false,
         token: '',
         model: '',
         acpTransport: 'websocket',
@@ -438,12 +469,15 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const openEditForm = (agent: AgentSummary) => {
       setForm({
         editing: true,
+        hasToken: Boolean(agent.hasToken),
+        clearToken: false,
         id: agent.id,
         kind: agent.kind,
         transport: agent.transport ?? 'ssh',
         ssh: agent.ssh ?? '',
         host: agent.host ?? '127.0.0.1',
         port: agent.port ? String(agent.port) : '',
+        tls: Boolean(agent.tls),
         token: '',
         model: agent.model ?? '',
         acpTransport: agent.acpTransport ?? 'websocket',
@@ -452,7 +486,8 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     };
 
     const saveAgentForm = async () => {
-      if (!form) return;
+      if (!form || saving) return;
+      setSaving(true);
       try {
         await apiPost(ctx, '/api/dsh-knot/agent-save', {
           id: form.id,
@@ -461,7 +496,9 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
           ssh: form.ssh,
           host: form.host,
           port: form.port ? Number(form.port) : undefined,
+          tls: form.transport === 'direct' ? form.tls : false,
           token: form.token,
+          clearToken: form.clearToken,
           model: form.model,
           acpTransport: form.kind === 'acp' ? form.acpTransport : undefined,
           acpCommand: form.kind === 'acp' && form.acpTransport === 'stdio' ? form.acpCommand : undefined,
@@ -471,12 +508,30 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
         await refreshState();
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSaving(false);
       }
     };
 
     const removeAgent = async (id: string) => {
       try {
         await apiPost(ctx, '/api/dsh-knot/agent-delete', { id });
+        if (historyAgent === id) {
+          historySeq.current++;
+          setHistoryAgent('');
+          setHistoryItems([]);
+          setHistoryLoading(false);
+        }
+        setDoctorByAgent((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        setExpandedDoctor((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
         showToast(t('deletedAgentToast'));
         await refreshState();
       } catch (err) {
@@ -1061,16 +1116,33 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                       }),
                     )
                   : h(
-                      'label',
-                      { className: 'dk-field' },
-                      h('span', null, t('fieldHost')),
-                      h('input', {
-                        className: 'dk-input dk-mono',
-                        placeholder: '127.0.0.1',
-                        value: form.host,
-                        onInput: (e: { target: { value: string } }) =>
-                          setForm((cur) => (cur ? { ...cur, host: e.target.value } : null)),
-                      }),
+                      'div',
+                      { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+                      h(
+                        'label',
+                        { className: 'dk-field' },
+                        h('span', null, t('fieldHost')),
+                        h('input', {
+                          className: 'dk-input dk-mono',
+                          placeholder: '127.0.0.1',
+                          value: form.host,
+                          onInput: (e: { target: { value: string } }) =>
+                            setForm((cur) => (cur ? { ...cur, host: e.target.value } : null)),
+                        }),
+                      ),
+                      form.transport === 'direct'
+                        ? h(
+                            'label',
+                            { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' } },
+                            h('input', {
+                              type: 'checkbox',
+                              checked: form.tls,
+                              onChange: (e: { target: { checked: boolean } }) =>
+                                setForm((cur) => (cur ? { ...cur, tls: Boolean(e.target.checked) } : null)),
+                            }),
+                            h('span', null, t('fieldTls')),
+                          )
+                        : null,
                     ),
                 form.kind === 'acp'
                   ? h(
@@ -1117,12 +1189,34 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                   h('input', {
                     className: 'dk-input dk-mono',
                     type: 'password',
+                    disabled: form.clearToken,
                     placeholder: form.editing ? t('fieldTokenKeep') : '••••••••',
                     value: form.token,
                     onInput: (e: { target: { value: string } }) =>
                       setForm((cur) => (cur ? { ...cur, token: e.target.value } : null)),
                   }),
                 ),
+                form.editing && form.hasToken
+                  ? h(
+                      'label',
+                      { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' } },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: form.clearToken,
+                        onChange: (e: { target: { checked: boolean } }) =>
+                          setForm((cur) =>
+                            cur
+                              ? {
+                                  ...cur,
+                                  clearToken: Boolean(e.target.checked),
+                                  token: e.target.checked ? '' : cur.token,
+                                }
+                              : null,
+                          ),
+                      }),
+                      h('span', null, t('fieldClearToken')),
+                    )
+                  : null,
                 h(
                   'label',
                   { className: 'dk-field' },
@@ -1138,11 +1232,15 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                 h(
                   'div',
                   { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' } },
-                  h('button', { className: 'dk-btn', onClick: () => setForm(null) }, t('cancelBtn')),
+                  h('button', { className: 'dk-btn', disabled: saving, onClick: () => setForm(null) }, t('cancelBtn')),
                   h(
                     'button',
-                    { className: 'dk-btn dk-btn-primary', onClick: () => void saveAgentForm() },
-                    t('saveAgent'),
+                    {
+                      className: 'dk-btn dk-btn-primary',
+                      disabled: saving,
+                      onClick: () => void saveAgentForm(),
+                    },
+                    saving ? t('savingAgent') : t('saveAgent'),
                   ),
                 ),
               ),

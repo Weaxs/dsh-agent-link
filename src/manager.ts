@@ -29,23 +29,28 @@ export class AgentManager {
   list(): Array<
     Pick<
       AgentConfig,
-      'id' | 'kind' | 'transport' | 'host' | 'ssh' | 'port' | 'acpTransport' | 'acpCommand' | 'model'
+      'id' | 'kind' | 'transport' | 'host' | 'ssh' | 'port' | 'tls' | 'acpTransport' | 'acpCommand' | 'model'
     > & {
       hasToken: boolean;
     }
   > {
-    return this.configs.map(({ id, kind, transport, host, ssh, port, acpTransport, acpCommand, model, ...rest }) => ({
-      id,
-      kind,
-      transport,
-      host,
-      ssh,
-      port,
-      acpTransport,
-      acpCommand,
-      model,
-      hasToken: Boolean(secret({ id, kind, transport, host, ssh, port, acpTransport, acpCommand, model, ...rest })),
-    }));
+    return this.configs.map(
+      ({ id, kind, transport, host, ssh, port, tls, acpTransport, acpCommand, model, ...rest }) => ({
+        id,
+        kind,
+        transport,
+        host,
+        ssh,
+        port,
+        tls,
+        acpTransport,
+        acpCommand,
+        model,
+        hasToken: Boolean(
+          secret({ id, kind, transport, host, ssh, port, tls, acpTransport, acpCommand, model, ...rest }),
+        ),
+      }),
+    );
   }
 
   getConfig(id: string): AgentConfig | undefined {
@@ -53,6 +58,7 @@ export class AgentManager {
   }
 
   async upsert(config: AgentConfig): Promise<void> {
+    this.abortJobsForAgent(config.id);
     const existing = this.adapters.get(config.id);
     if (existing) await existing.close().catch(() => {});
     const index = this.configs.findIndex((item) => item.id === config.id);
@@ -62,6 +68,7 @@ export class AgentManager {
   }
 
   async remove(id: string): Promise<boolean> {
+    this.abortJobsForAgent(id);
     const existing = this.adapters.get(id);
     if (!existing) return false;
     this.adapters.delete(id);
@@ -138,9 +145,11 @@ export class AgentManager {
     const job = this.get(id);
     if (['completed', 'failed', 'cancelled'].includes(job.status)) return job;
     job.status = 'cancelled';
+    delete job.pendingApproval;
     job.updatedAt = Date.now();
     this.controllers.get(id)?.abort(new Error('job cancelled'));
-    await this.adapter(job.agentId).cancel(job.sessionId!, signal);
+    const adapter = this.adapters.get(job.agentId);
+    if (adapter && job.sessionId) await adapter.cancel(job.sessionId, signal);
     return job;
   }
 
@@ -160,6 +169,16 @@ export class AgentManager {
     for (const controller of this.controllers.values()) controller.abort(new Error('manager closed'));
     this.controllers.clear();
     await Promise.allSettled([...this.adapters.values()].map((adapter) => adapter.close()));
+  }
+
+  private abortJobsForAgent(agentId: string): void {
+    for (const [id, job] of this.jobs) {
+      if (job.agentId !== agentId || ['completed', 'failed', 'cancelled'].includes(job.status)) continue;
+      job.status = 'cancelled';
+      delete job.pendingApproval;
+      job.updatedAt = Date.now();
+      this.controllers.get(id)?.abort(new Error(`agent "${agentId}" reconfigured`));
+    }
   }
 
   private evictFinishedJobs(): void {

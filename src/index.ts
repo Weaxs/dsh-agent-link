@@ -4,7 +4,7 @@ import { normalizeConfig } from './config.js';
 import { AgentManager } from './manager.js';
 import { McpServer } from './mcp/server.js';
 import type { SessionControllerLike } from './mcp/session-service.js';
-import { loadStoredAgents } from './store.js';
+import { loadStoredState } from './store.js';
 import { registerTools } from './tools.js';
 import type { PluginConfig } from './types.js';
 import { registerWebRoutes } from './web/routes.js';
@@ -55,9 +55,10 @@ export const Config = Schema.object({
 
 export async function apply(ctx: Context, input: PluginConfig = {}): Promise<void> {
   const config = normalizeConfig(input);
-  const stored = loadStoredAgents();
-  const merged = [...config.agents];
-  for (const agent of stored) {
+  const stored = loadStoredState();
+  const deleted = new Set(stored.deletedIds);
+  const merged = config.agents.filter((item) => !deleted.has(item.id));
+  for (const agent of stored.agents) {
     const idx = merged.findIndex((item) => item.id === agent.id);
     if (idx >= 0) merged[idx] = agent;
     else merged.push(agent);
@@ -68,7 +69,9 @@ export async function apply(ctx: Context, input: PluginConfig = {}): Promise<voi
   let mcp: McpServer | undefined;
   if (config.mcp?.enabled) {
     if (!sessions) throw new Error('MCP sharing requires the dsh sessionController service');
-    mcp = new McpServer(config.mcp, sessions);
+    const mcpConfig =
+      stored.allowSessions !== undefined ? { ...config.mcp, allowSessions: stored.allowSessions } : config.mcp;
+    mcp = new McpServer(mcpConfig, sessions);
     await mcp.start();
   }
   registerWebRoutes(ctx, manager, mcp, sessions);

@@ -94,10 +94,11 @@ export function sshHint(text: string): string {
   if (value.includes('passphrase'))
     return 'Add the private key to ssh-agent or the macOS keychain; background SSH cannot prompt.';
   if (value.includes('openclaw_session_token') || value.includes('openclaw_gateway_token'))
-    return 'Set OPENCLAW_GATEWAY_TOKEN or configure tokenEnv.';
-  if (value.includes('hermes_api_key')) return 'Set HERMES_API_KEY or configure tokenEnv.';
+    return 'Configure the agent token in the DSH Knot Web UI (or set OPENCLAW_GATEWAY_TOKEN / tokenEnv).';
+  if (value.includes('hermes_api_key'))
+    return 'Configure the agent token in the DSH Knot Web UI (or set HERMES_API_KEY / tokenEnv).';
   if (value.includes('launch token') || value.includes('dsh_gateway_token'))
-    return 'Copy the launch token from the remote dsh web URL into DSH_GATEWAY_TOKEN or configure tokenEnv.';
+    return 'Paste the remote dsh web launch token into the agent token field in the DSH Knot Web UI (or DSH_GATEWAY_TOKEN).';
   return 'See docs/SSH.md. The plugin never changes ~/.ssh/config automatically.';
 }
 

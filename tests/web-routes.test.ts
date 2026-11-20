@@ -1,11 +1,12 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Config } from '../src/index.js';
+import { apply, Config } from '../src/index.js';
 import { AgentManager } from '../src/manager.js';
 import { McpServer } from '../src/mcp/server.js';
 import type { SessionControllerLike } from '../src/mcp/session-service.js';
+import { loadStoredState } from '../src/store.js';
 import type { AgentAdapter, AgentConfig, AgentEvent } from '../src/types.js';
 import { registerWebRoutes, WEB_ROUTES } from '../src/web/routes.js';
 
@@ -125,20 +126,71 @@ describe('web UI host routes & schemastery Config', () => {
     expect(cancelled.value.status).toBe('cancelled');
 
     process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-store-'));
+    const toggledPersisted = await post(WEB_ROUTES.mcpShare, { sessionId: 'local-1', allow: true });
+    expect(toggledPersisted.ok).toBe(true);
+    expect(loadStoredState().allowSessions).toEqual(['local-1']);
+
     const saved = await post(WEB_ROUTES.agentSave, {
       id: 'hermes-second',
       kind: 'hermes',
-      transport: 'ssh',
-      ssh: 'gpu-2',
+      transport: 'direct',
+      host: '100.64.0.2',
+      tls: true,
       token: 'per-agent-secret-token',
+      acpArgs: ['--flag'],
     });
     expect(saved.ok).toBe(true);
-    expect(saved.value.agents.map((a: any) => [a.id, a.hasToken])).toContainEqual(['hermes-second', true]);
+    expect(saved.value.agents.map((a: any) => [a.id, a.hasToken, a.tls])).toContainEqual(['hermes-second', true, true]);
     expect(JSON.stringify(saved)).not.toContain('per-agent-secret-token');
 
-    const deleted = await post(WEB_ROUTES.agentDelete, { id: 'hermes-second' });
+    // Editing without changing token or advanced fields preserves both
+    const edited = await post(WEB_ROUTES.agentSave, {
+      id: 'hermes-second',
+      kind: 'hermes',
+      transport: 'direct',
+      host: '100.64.0.9',
+      model: 'deepseek-chat',
+    });
+    expect(edited.ok).toBe(true);
+    expect(manager.getConfig('hermes-second')?.token).toBe('per-agent-secret-token');
+    expect(manager.getConfig('hermes-second')?.tls).toBe(true);
+    expect(manager.getConfig('hermes-second')?.acpArgs).toEqual(['--flag']);
+
+    // Clearing token via clearToken: true removes the stored token
+    const cleared = await post(WEB_ROUTES.agentSave, {
+      id: 'hermes-second',
+      kind: 'hermes',
+      transport: 'direct',
+      host: '100.64.0.9',
+      clearToken: true,
+    });
+    expect(cleared.ok).toBe(true);
+    expect(manager.getConfig('hermes-second')?.token).toBeUndefined();
+
+    // Deleting an agent records a tombstone in deletedIds and aborts in-flight jobs
+    const activeJob = manager.start('hermes-local', 'in-flight', undefined);
+    const deleted = await post(WEB_ROUTES.agentDelete, { id: 'hermes-local' });
     expect(deleted.ok).toBe(true);
-    expect(deleted.value.agents.map((a: any) => a.id)).not.toContain('hermes-second');
+    expect(deleted.value.agents.map((a: any) => a.id)).not.toContain('hermes-local');
+    expect(manager.get(activeJob.id).status).toBe('cancelled');
+    expect(loadStoredState().deletedIds).toContain('hermes-local');
+
+    // Deleted static agent stays deleted when plugin reloads
+    const registeredTools: string[] = [];
+    const effects: Array<() => Promise<void>> = [];
+    await apply(
+      {
+        tools: { register: (t: { name: string }) => registeredTools.push(t.name) },
+        effect: (fn: () => () => Promise<void>) => effects.push(fn()),
+      } as any,
+      { agents: [config] },
+    );
+    for (const cleanup of effects) await cleanup();
+
+    // Corrupted agents.json throws instead of silently wiping state
+    writeFileSync(join(process.env.DSH_KNOT_STATE_DIR, 'agents.json'), '{broken-json', 'utf8');
+    expect(() => loadStoredState()).toThrow();
+
     await manager.close();
   });
 });
