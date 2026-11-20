@@ -15,14 +15,14 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       description: 'List remote Hermes, OpenClaw, and DSH agents configured through dsh-agent-link.',
       parameters: { health: { type: 'boolean', description: 'Also probe every agent gateway.' } },
       output,
-      async execute(args) {
+      async execute(args, exec) {
         const agents = manager.list();
         if (!args.health) return { agents };
         return {
           agents: await Promise.all(
             agents.map(async (agent) => {
               try {
-                return { ...agent, health: await manager.adapter(agent.id).health() };
+                return { ...agent, health: await manager.adapter(agent.id).health(exec.signal) };
               } catch (error) {
                 return { ...agent, health: { ok: false, error: message(error) } };
               }
@@ -47,7 +47,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       output,
       async execute(args, exec) {
         const job = manager.start(args.agent, args.task, args.session, (completed) => notifyAgent(exec, completed));
-        return plain(args.wait ? await manager.wait(job.id) : job);
+        return plain(args.wait ? await manager.wait(job.id, exec.signal) : job);
       },
     }),
   );
@@ -65,7 +65,7 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       output,
       async execute(args, exec) {
         const job = manager.start(args.agent, args.message, args.session, (completed) => notifyAgent(exec, completed));
-        return plain(args.wait ? await manager.wait(job.id) : job);
+        return plain(args.wait ? await manager.wait(job.id, exec.signal) : job);
       },
     }),
   );
@@ -79,8 +79,8 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
         wait: { type: 'boolean', description: 'Wait for the job to finish.' },
       },
       output,
-      async execute(args) {
-        return plain(args.wait ? await manager.wait(args.job) : manager.get(args.job));
+      async execute(args, exec) {
+        return plain(args.wait ? await manager.wait(args.job, exec.signal) : manager.get(args.job));
       },
     }),
   );
@@ -91,8 +91,8 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       description: 'Cancel a running task on a remote Hermes, OpenClaw, or DSH agent.',
       parameters: { job: { type: 'string', required: true } },
       output,
-      async execute(args) {
-        return plain(await manager.cancel(args.job));
+      async execute(args, exec) {
+        return plain(await manager.cancel(args.job, exec.signal));
       },
     }),
   );
@@ -106,8 +106,8 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
         choice: { type: 'string', required: true, description: 'The exact choice offered by the remote agent.' },
       },
       output,
-      async execute(args) {
-        return plain(await manager.respond(args.job, args.choice));
+      async execute(args, exec) {
+        return plain(await manager.respond(args.job, args.choice, exec.signal));
       },
     }),
   );
@@ -118,8 +118,8 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       description: 'Check transport, SSH, gateway reachability and protocol health for configured agents.',
       parameters: { agent: { type: 'string', description: 'Check one agent id; omit to check all.' } },
       output,
-      async execute(args) {
-        return plain(await runDoctor(manager, args.agent));
+      async execute(args, exec) {
+        return plain(await runDoctor(manager, args.agent, exec.signal));
       },
     }),
   );

@@ -17,7 +17,9 @@ import { createNodeWebSocketUpgradeHandler } from '@agentclientprotocol/sdk/expe
 import { AcpServer } from '@agentclientprotocol/sdk/experimental/server';
 import { WebSocketServer } from 'ws';
 import { createNativeAdapter, createNativeSessionId } from '../adapters/native.js';
+import { verifyBearerToken } from '../policy/auth.js';
 import type { AgentAdapter, AgentConfig } from '../types.js';
+import { VERSION } from '../version.js';
 
 export type NativeAdapterFactory = (config: AgentConfig) => AgentAdapter;
 
@@ -69,7 +71,12 @@ export class AcpBridge {
     });
     server.on('upgrade', (request, socket, head) => {
       const path = new URL(request.url ?? '/', 'http://localhost').pathname;
-      if (path !== '/acp' || (token && request.headers.authorization !== `Bearer ${token}`)) {
+      if (path !== '/acp') {
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      if (token && !verifyBearerToken(request.headers.authorization, token)) {
         socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
         socket.destroy();
         return;
@@ -113,7 +120,7 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
     await adapter.health(signal);
     return {
       protocolVersion: PROTOCOL_VERSION,
-      agentInfo: { name: 'dsh-agent-link-acp-bridge', version: '0.1.0' },
+      agentInfo: { name: 'dsh-agent-link-acp-bridge', version: VERSION },
       agentCapabilities: {
         loadSession: false,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },

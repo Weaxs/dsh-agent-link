@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AcpBridge } from '../src/acp/bridge.js';
-import { AcpAdapter } from '../src/adapters/acp.js';
+import { AcpAdapter, acpStdioSpawnSpec } from '../src/adapters/acp.js';
 import type { AgentAdapter, AgentEvent } from '../src/types.js';
 
 class FakeNativeAdapter implements AgentAdapter {
@@ -139,5 +139,25 @@ describe('ACP provider and bridge', () => {
     const events = [];
     for await (const event of adapter.prompt('stdio-alias', 'hello')) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'final', text: 'stdio:hello', stopReason: 'end_turn' });
+  });
+
+  it('keeps local SSH flags unquoted while shell-quoting remote ACP stdio command and args', () => {
+    const spec = acpStdioSpawnSpec({
+      id: 'remote-stdio',
+      kind: 'acp',
+      transport: 'ssh',
+      ssh: 'gpu-box',
+      sshConfig: '/tmp/my ssh config/config',
+      acpTransport: 'stdio',
+      acpCommand: '/usr/local/bin/acp agent',
+      acpArgs: ['--flag', '$HOME;rm -rf /', "it's"],
+    });
+    expect(spec.command).toBe('ssh');
+    expect(spec.args.slice(0, 2)).toEqual(['-F', '/tmp/my ssh config/config']);
+    expect(spec.args.slice(-3)).toEqual([
+      'gpu-box',
+      '--',
+      `'/usr/local/bin/acp agent' '--flag' '$HOME;rm -rf /' 'it'\\''s'`,
+    ]);
   });
 });

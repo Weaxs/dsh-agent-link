@@ -150,7 +150,7 @@ Ask dsh:
 Use agent_link_doctor to check every configured agent.
 ```
 
-The doctor checks SSH configuration, non-interactive login, gateway reachability, and protocol health. It does not modify `~/.ssh/config` or accept unknown host keys.
+The doctor checks SSH configuration, non-interactive login, gateway reachability, and protocol health. It does not modify `~/.ssh/config` or accept unknown host keys. If an SSH key is restricted to port forwarding without shell login, `ssh-login` reports that restriction while `gateway-health` is still checked.
 
 ## Model tools
 
@@ -164,7 +164,7 @@ The doctor checks SSH configuration, non-interactive login, gateway reachability
 | `agent_respond`     | Answer an approval using one of its offered choices.                              |
 | `agent_link_doctor` | Diagnose transport, SSH, gateway, and protocol failures.                          |
 
-Long tasks run in the background. When the originating dsh Agent supports `followup`, the plugin posts a completion notification back to that session.
+Long tasks run in the background with bounded in-memory output and finished-job retention. Tool cancellations (`exec.signal`) are forwarded into network calls, waits, doctor checks, and remote cancellations; `agent_cancel` aborts both the local stream and the remote run without discarding partial output. When the originating dsh Agent supports `followup`, the plugin posts a completion notification back to that session.
 
 ## Share dsh sessions through MCP
 
@@ -200,7 +200,7 @@ MCP tools:
 - `dsh_session_read`
 - `dsh_session_watch`
 
-All returned content is recursively redacted for common tokens, bearer credentials, JWTs, cookies, and private keys. Requests require `Authorization: Bearer $DSH_AGENT_LINK_TOKEN`.
+All returned content is recursively redacted (with circular-reference protection) for common API keys, bearer/basic credentials, JWTs, cookies, and private keys. Requests require `Authorization: Bearer $DSH_AGENT_LINK_TOKEN` (verified in constant time), request bodies are capped at 1 MB (`413` on overflow), JSON-RPC batches are capped at 50 items, and wildcard bind addresses (`0.0.0.0`, `::`) are rejected.
 
 For a remote Hermes MCP configuration using SSH forwarding, use:
 
@@ -227,6 +227,7 @@ The SSH reverse-forward setup and Tailscale alternative are described in [docs/D
 
 ```bash
 npm ci
+npm run lint
 npm run typecheck
 npm test
 npm run build
@@ -237,7 +238,7 @@ See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN
 
 ## Release
 
-Releases run only through GitHub Actions. Add `NPM_TOKEN` to the repository secrets, then push a tag such as `v0.1.0`. The workflow verifies the tag against `package.json`, runs all checks, publishes both package names with provenance, and creates a GitHub Release.
+Releases run only through GitHub Actions. Bump the version with `npm run release <semver>` (which syncs `package.json` and `src/version.ts`), add `NPM_TOKEN` to the repository secrets, and push a matching tag such as `v0.1.0`. The workflow verifies the tag against `package.json` and `src/version.ts`, runs all checks, publishes both package names with provenance, and creates a GitHub Release.
 
 ## License
 

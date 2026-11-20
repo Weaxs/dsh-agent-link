@@ -5,10 +5,13 @@ import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.
 
 export type AdapterFactory = (config: AgentConfig) => AgentAdapter;
 
+const MAX_JOBS = 200;
+
 export class AgentManager {
   readonly adapters = new Map<string, AgentAdapter>();
   private readonly jobs = new Map<string, AgentJob>();
   private readonly completions = new Map<string, Promise<AgentJob>>();
+  private readonly controllers = new Map<string, AbortController>();
 
   constructor(
     readonly configs: AgentConfig[],
@@ -44,9 +47,15 @@ export class AgentManager {
       text: '',
     };
     this.jobs.set(id, job);
+    this.evictFinishedJobs();
     const completion = this.run(job, adapter, text, remoteSession, onDone);
     this.completions.set(id, completion);
-    completion.finally(() => this.completions.delete(id)).catch(() => {});
+    completion
+      .finally(() => {
+        this.completions.delete(id);
+        this.controllers.delete(id);
+      })
+      .catch(() => {});
     return job;
   }
 
@@ -56,33 +65,59 @@ export class AgentManager {
     return job;
   }
 
-  async wait(id: string): Promise<AgentJob> {
-    return this.completions.get(id) ?? this.get(id);
+  async wait(id: string, signal?: AbortSignal): Promise<AgentJob> {
+    const completion = this.completions.get(id);
+    if (!completion) return this.get(id);
+    if (!signal) return completion;
+    if (signal.aborted) throw signal.reason ?? new Error('request aborted');
+    let onAbort: (() => void) | undefined;
+    try {
+      return await Promise.race([
+        completion,
+        new Promise<never>((_, reject) => {
+          onAbort = () => reject(signal.reason ?? new Error('request aborted'));
+          signal.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]);
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    }
   }
 
-  async cancel(id: string): Promise<AgentJob> {
+  async cancel(id: string, signal?: AbortSignal): Promise<AgentJob> {
     const job = this.get(id);
     if (['completed', 'failed', 'cancelled'].includes(job.status)) return job;
-    await this.adapter(job.agentId).cancel(job.sessionId!);
     job.status = 'cancelled';
     job.updatedAt = Date.now();
+    this.controllers.get(id)?.abort(new Error('job cancelled'));
+    await this.adapter(job.agentId).cancel(job.sessionId!, signal);
     return job;
   }
 
-  async respond(id: string, choice: string): Promise<AgentJob> {
+  async respond(id: string, choice: string, signal?: AbortSignal): Promise<AgentJob> {
     const job = this.get(id);
     const pending = job.pendingApproval;
     if (!pending) throw new Error(`Job ${id} has no pending approval`);
     const adapter = this.adapter(job.agentId);
     if (!adapter.respond) throw new Error(`${job.agentId} does not support approval responses through this adapter`);
-    await adapter.respond(job.sessionId!, pending.requestId, choice);
+    await adapter.respond(job.sessionId!, pending.requestId, choice, signal);
     delete job.pendingApproval;
     job.updatedAt = Date.now();
     return job;
   }
 
   async close(): Promise<void> {
+    for (const controller of this.controllers.values()) controller.abort(new Error('manager closed'));
+    this.controllers.clear();
     await Promise.allSettled([...this.adapters.values()].map((adapter) => adapter.close()));
+  }
+
+  private evictFinishedJobs(): void {
+    if (this.jobs.size <= MAX_JOBS) return;
+    for (const [id, job] of this.jobs) {
+      if (this.jobs.size <= MAX_JOBS) break;
+      if (['completed', 'failed', 'cancelled'].includes(job.status)) this.jobs.delete(id);
+    }
   }
 
   private async run(
@@ -93,6 +128,7 @@ export class AgentManager {
     onDone?: (job: AgentJob) => void,
   ): Promise<AgentJob> {
     const controller = new AbortController();
+    this.controllers.set(job.id, controller);
     const timer = setTimeout(() => {
       controller.abort(new Error(`job timed out after ${this.timeoutMs}ms`));
       adapter.cancel(sessionId).catch(() => {});
@@ -106,14 +142,14 @@ export class AgentManager {
           job.pendingApproval = { requestId: event.requestId ?? '', choices: event.choices ?? [], text: event.text };
         } else if (event.type === 'error') throw new Error(event.text ?? 'remote agent failed');
         else if (event.type === 'final') {
-          if (event.text) job.text = event.text;
-          job.status = 'completed';
+          if (event.text) job.text = event.text.slice(-2_000_000);
+          if (job.status === 'running') job.status = event.stopReason === 'cancelled' ? 'cancelled' : 'completed';
         }
         job.updatedAt = Date.now();
       }
-      if (job.status === 'running') job.status = 'completed';
+      if (job.status === 'running') job.status = controller.signal.aborted ? 'cancelled' : 'completed';
     } catch (error) {
-      job.status = controller.signal.aborted ? 'cancelled' : 'failed';
+      job.status = controller.signal.aborted || job.status === 'cancelled' ? 'cancelled' : 'failed';
       job.error = error instanceof Error ? error.message : String(error);
     } finally {
       clearTimeout(timer);

@@ -1,10 +1,15 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { verifyBearerToken } from '../policy/auth.js';
 import { redact } from '../policy/redact.js';
 import type { McpConfig } from '../types.js';
+import { VERSION } from '../version.js';
 import type { SessionControllerLike } from './session-service.js';
 
 const PROTOCOL_VERSION = '2025-03-26';
+const MAX_BATCH_SIZE = 50;
+
+class BodyTooLargeError extends Error {}
 
 export class McpServer {
   private server?: http.Server;
@@ -24,6 +29,9 @@ export class McpServer {
     if (!this.token)
       throw new Error('MCP is enabled but no bearer token is configured (tokenEnv defaults to DSH_AGENT_LINK_TOKEN)');
     const host = this.config.host ?? '127.0.0.1';
+    if (host === '0.0.0.0' || host === '::') {
+      throw new Error('MCP server must bind to loopback or a specific trusted address, never 0.0.0.0 or ::');
+    }
     const port = this.config.port ?? 19_400;
     this.server = http.createServer((request, response) => {
       this.handle(request, response).catch((error) => {
@@ -48,17 +56,23 @@ export class McpServer {
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     response.setHeader('Cache-Control', 'no-store');
-    if (request.url !== '/mcp') return json(response, 404, { error: 'Not found' });
+    const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    if (pathname !== '/mcp') return json(response, 404, { error: 'Not found' });
     if (request.method !== 'POST') return json(response, 405, { error: 'Use JSON-RPC over POST' }, { Allow: 'POST' });
-    if (request.headers.authorization !== `Bearer ${this.token}`) return json(response, 401, { error: 'Unauthorized' });
+    if (!verifyBearerToken(request.headers.authorization, this.token!))
+      return json(response, 401, { error: 'Unauthorized' });
     let message: any;
     try {
       message = JSON.parse((await readBody(request)).toString('utf8'));
-    } catch {
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) return json(response, 413, { error: error.message });
       return json(response, 400, { error: 'Invalid JSON' });
     }
     const batch = Array.isArray(message);
     const messages = batch ? message : [message];
+    if (batch && messages.length > MAX_BATCH_SIZE) {
+      return json(response, 400, { error: `JSON-RPC batch exceeds limit of ${MAX_BATCH_SIZE}` });
+    }
     const replies = [];
     for (const item of messages) {
       const reply = await this.rpc(item);
@@ -82,7 +96,7 @@ export class McpServer {
           protocolVersion:
             typeof message.params?.protocolVersion === 'string' ? message.params.protocolVersion : PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'dsh-agent-link', version: '0.1.0' },
+          serverInfo: { name: 'dsh-agent-link', version: VERSION },
           instructions: 'Only sessions explicitly allow-listed by the local user are visible. All output is redacted.',
         });
       if (message.method === 'notifications/initialized' || message.method.startsWith('notifications/'))
@@ -250,7 +264,7 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 1_000_000) throw new Error('Request body is too large');
+    if (size > 1_000_000) throw new BodyTooLargeError('Request body is too large');
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);

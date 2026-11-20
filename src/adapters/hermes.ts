@@ -51,15 +51,15 @@ export class HermesAdapter implements AgentAdapter {
     });
     const runId = String(accepted.run_id ?? '');
     if (!runId) throw new Error(`Hermes did not return a run_id: ${JSON.stringify(accepted)}`);
-    this.runs.set(id, runId);
+    this.rememberRun(id, runId);
     let terminal = false;
     let output = '';
+    const response = await this.transport.stream({
+      path: `/v1/runs/${encodeURIComponent(runId)}/events`,
+      headers: this.headers(),
+      signal,
+    });
     try {
-      const response = await this.transport.stream({
-        path: `/v1/runs/${encodeURIComponent(runId)}/events`,
-        headers: this.headers(),
-        signal,
-      });
       for await (const frame of readSse(response)) {
         if (frame.data === '[DONE]') break;
         let event: Record<string, unknown>;
@@ -106,18 +106,19 @@ export class HermesAdapter implements AgentAdapter {
         }
       }
     } finally {
-      if (!terminal && !signal?.aborted) {
-        const status = await this.status(runId, signal);
-        const state = String(status.status ?? '');
-        const finalText = textOf(status.output_text ?? status.output ?? status.response ?? status.message);
-        if (state === 'completed') yield { type: 'final', text: finalText || output, stopReason: state };
-        else if (state)
-          yield {
-            type: 'error',
-            text: String(status.error ?? `Hermes stream ended while run was ${state}`),
-            stopReason: state,
-          };
-      }
+      response.destroy();
+    }
+    if (!terminal && !signal?.aborted) {
+      const status = await this.status(runId, signal);
+      const state = String(status.status ?? '');
+      const finalText = textOf(status.output_text ?? status.output ?? status.response ?? status.message);
+      if (state === 'completed') yield { type: 'final', text: finalText || output, stopReason: state };
+      else if (state)
+        yield {
+          type: 'error',
+          text: String(status.error ?? `Hermes stream ended while run was ${state}`),
+          stopReason: state,
+        };
     }
   }
 
@@ -139,6 +140,16 @@ export class HermesAdapter implements AgentAdapter {
 
   async close(): Promise<void> {
     await this.transport.close();
+  }
+
+  private rememberRun(sessionId: string, runId: string): void {
+    this.runs.delete(sessionId);
+    this.runs.set(sessionId, runId);
+    while (this.runs.size > 500) {
+      const oldest = this.runs.keys().next().value;
+      if (oldest === undefined) break;
+      this.runs.delete(oldest);
+    }
   }
 
   private async status(runId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {

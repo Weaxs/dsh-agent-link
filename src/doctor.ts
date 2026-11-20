@@ -14,6 +14,7 @@ export interface DoctorStep {
 export async function runDoctor(
   manager: AgentManager,
   only?: string,
+  signal?: AbortSignal,
 ): Promise<{ agents: Array<{ id: string; steps: DoctorStep[] }> }> {
   const configs = manager.configs.filter((config) => !only || config.id === only);
   if (only && configs.length === 0) throw new Error(`Unknown agent "${only}"`);
@@ -27,6 +28,7 @@ export async function runDoctor(
             const { stdout } = await execute('ssh', [...sshOptions, '-G', config.ssh!], {
               timeout: 10_000,
               maxBuffer: 2_000_000,
+              signal,
             });
             const picked = stdout
               .split('\n')
@@ -42,12 +44,12 @@ export async function runDoctor(
               [...sshOptions, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', config.ssh!, 'echo', 'ok'],
               {
                 timeout: 15_000,
+                signal,
               },
             );
             steps.push({ name: 'ssh-login', ok: true, detail: 'Non-interactive SSH login succeeded.' });
           } catch (error) {
             steps.push(failure('ssh-login', error));
-            return { id: config.id, steps };
           }
         } else if (config.transport === 'direct') {
           steps.push({
@@ -59,7 +61,7 @@ export async function runDoctor(
           steps.push({ name: 'local-transport', ok: true, detail: 'Using the local loopback transport.' });
         }
         try {
-          const health = await manager.adapter(config.id).health();
+          const health = await manager.adapter(config.id).health(signal);
           steps.push({ name: 'gateway-health', ok: true, detail: JSON.stringify(health) });
         } catch (error) {
           steps.push(failure('gateway-health', error));

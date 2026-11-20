@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const manifestPath = new URL('../package.json', import.meta.url);
+const versionPath = new URL('../src/version.ts', import.meta.url);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const versionSource = readFileSync(versionPath, 'utf8');
 const argument = process.argv[2];
 
 if (argument === '--check') {
@@ -11,6 +13,9 @@ if (argument === '--check') {
   if (expected !== manifest.version) {
     throw new Error(`Tag ${tag} does not match package.json version ${manifest.version}`);
   }
+  if (!versionSource.includes(`'${manifest.version}'`)) {
+    throw new Error(`src/version.ts does not match package.json version ${manifest.version}`);
+  }
   console.log(`${manifest.name}@${manifest.version} matches ${tag}`);
 } else if (argument) {
   if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(argument)) {
@@ -18,7 +23,8 @@ if (argument === '--check') {
   }
   manifest.version = argument;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`Updated package.json to ${argument}`);
+  writeFileSync(versionPath, `export const VERSION = '${argument}';\n`);
+  console.log(`Updated package.json and src/version.ts to ${argument}`);
 } else {
   console.log(manifest.version);
 }

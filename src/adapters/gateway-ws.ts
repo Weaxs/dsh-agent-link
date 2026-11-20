@@ -80,8 +80,8 @@ export class GatewayWebSocket {
     });
   }
 
-  async nextEvent(): Promise<IteratorResult<Record<string, any>>> {
-    return this.events.next();
+  async nextEvent(signal?: AbortSignal): Promise<IteratorResult<Record<string, any>>> {
+    return this.events.next(signal);
   }
 
   async close(): Promise<void> {

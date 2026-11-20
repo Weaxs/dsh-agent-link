@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { secret } from '../config.js';
 import { transportFor } from '../transports/http.js';
-import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
+import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, HttpResponse, Transport } from '../types.js';
 
 export class DshAdapter implements AgentAdapter {
   readonly kind = 'dsh' as const;
   private readonly transport: Transport;
   private cookie?: string;
+  private connecting?: Promise<void>;
   private readonly cursors = new Map<string, number>();
   private readonly sessionIds = new Map<string, string>();
 
@@ -37,6 +38,7 @@ export class DshAdapter implements AgentAdapter {
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     const requestedId = sessionId ?? randomUUID();
     let actualId = this.sessionIds.get(requestedId) ?? requestedId;
+    let output = '';
     try {
       if (!this.sessionIds.has(requestedId)) {
         const created = await this.rpc(
@@ -48,8 +50,8 @@ export class DshAdapter implements AgentAdapter {
           signal,
         );
         actualId = String(created.sessionId ?? requestedId);
-        this.sessionIds.set(requestedId, actualId);
-        this.sessionIds.set(actualId, actualId);
+        rememberBounded(this.sessionIds, requestedId, actualId);
+        rememberBounded(this.sessionIds, actualId, actualId);
       }
       if (this.config.model) {
         await this.rpc(
@@ -76,7 +78,6 @@ export class DshAdapter implements AgentAdapter {
         signal,
       );
 
-      let output = '';
       while (true) {
         const afterSeq = this.cursors.get(actualId) ?? 0;
         const waited = await this.rpc(
@@ -112,7 +113,7 @@ export class DshAdapter implements AgentAdapter {
           const failure = durableFailure(page.records ?? []);
           if (failure) throw new Error(failure);
         }
-        this.cursors.set(actualId, Math.max(afterSeq, cursor));
+        rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));
         if (waited.reason !== 'timeout') {
           yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle') };
           return;
@@ -121,7 +122,7 @@ export class DshAdapter implements AgentAdapter {
     } catch (error) {
       if (signal?.aborted) {
         await this.cancel(actualId).catch(() => {});
-        yield { type: 'final', text: '', stopReason: 'cancelled' };
+        yield { type: 'final', text: output, stopReason: 'cancelled' };
         return;
       }
       yield { type: 'error', text: error instanceof Error ? error.message : String(error) };
@@ -138,41 +139,76 @@ export class DshAdapter implements AgentAdapter {
 
   private async connect(signal?: AbortSignal): Promise<void> {
     if (this.cookie) return;
-    const token = secret(this.config);
-    if (!token) throw new Error(`${this.id}: a dsh web launch token is required (token or tokenEnv)`);
-    const response = await this.transport.request({
-      path: `/connect?token=${encodeURIComponent(token)}&interactions=none`,
-      signal,
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      const token = secret(this.config);
+      if (!token) throw new Error(`${this.id}: a dsh web launch token is required (token or tokenEnv)`);
+      const response = await this.transport.request({
+        path: `/connect?token=${encodeURIComponent(token)}&interactions=none`,
+        signal,
+      });
+      if (response.status !== 302) throw new Error(`DSH /connect returned HTTP ${response.status}: ${response.text}`);
+      const header = response.headers['set-cookie'];
+      const cookie = Array.isArray(header) ? header[0] : header;
+      const pair = cookie?.split(';', 1)[0]?.trim();
+      if (!pair) throw new Error('DSH /connect did not return an API cookie');
+      this.cookie = pair;
+    })().finally(() => {
+      this.connecting = undefined;
     });
-    if (response.status !== 302) throw new Error(`DSH /connect returned HTTP ${response.status}: ${response.text}`);
-    const header = response.headers['set-cookie'];
-    const cookie = Array.isArray(header) ? header[0] : header;
-    const pair = cookie?.split(';', 1)[0]?.trim();
-    if (!pair) throw new Error('DSH /connect did not return an API cookie');
-    this.cookie = pair;
+    return this.connecting;
   }
 
-  private async rpc(method: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
+  private async rpc(
+    method: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    retried = false,
+  ): Promise<any> {
     await this.connect(signal);
-    const response = await this.transport.request({
-      method: 'POST',
-      path: `/api/session/${method}`,
-      headers: { Cookie: this.cookie! },
-      body: {
-        type: 'client-request',
-        rpcId: randomUUID(),
-        method: `session/${method}`,
-        payload: { args: method === 'list' ? { _request: args } : { request: args } },
-      },
-      signal,
-    });
-    const envelope = JSON.parse(response.text);
+    let response: HttpResponse;
+    try {
+      response = await this.transport.request({
+        method: 'POST',
+        path: `/api/session/${method}`,
+        headers: { Cookie: this.cookie! },
+        body: {
+          type: 'client-request',
+          rpcId: randomUUID(),
+          method: `session/${method}`,
+          payload: { args: method === 'list' ? { _request: args } : { request: args } },
+        },
+        signal,
+      });
+    } catch (error) {
+      if (!retried && error instanceof Error && /^HTTP (?:401|403):/.test(error.message)) {
+        this.cookie = undefined;
+        return this.rpc(method, args, signal, true);
+      }
+      throw error;
+    }
+    let envelope: any;
+    try {
+      envelope = JSON.parse(response.text);
+    } catch {
+      throw new Error(`DSH returned non-JSON HTTP ${response.status}: ${response.text.slice(0, 500)}`);
+    }
     const result = envelope.result;
     if (result?.ok !== true) {
       const error = result?.error;
       throw new Error(`${error?.code ?? 'dsh/rpc'}: ${error?.message ?? response.text}`);
     }
     return result.value;
+  }
+}
+
+function rememberBounded<K, V>(map: Map<K, V>, key: K, value: V, limit = 500): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > limit) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
   }
 }
 

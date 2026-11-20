@@ -19,10 +19,12 @@ import WebSocket from 'ws';
 import { AsyncQueue } from '../async-queue.js';
 import { secret } from '../config.js';
 import { transportFor } from '../transports/http.js';
-import { sshArguments } from '../transports/stdio-socket.js';
+import { shellQuote, sshBaseArguments } from '../transports/stdio-socket.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
+import { VERSION } from '../version.js';
 
 interface PendingPermission {
+  sessionId: string;
   resolve: (response: RequestPermissionResponse) => void;
 }
 
@@ -74,6 +76,7 @@ export class AcpAdapter implements AgentAdapter {
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     const alias = sessionId ?? randomUUID();
     let actualId = alias;
+    let output = '';
     const queue = new AsyncQueue<PromptMessage>();
     try {
       await this.connect(signal);
@@ -113,9 +116,8 @@ export class AcpAdapter implements AgentAdapter {
           });
         }
       })();
-      let output = '';
       while (true) {
-        const next = await queue.next();
+        const next = await queue.next(signal);
         if (next.done) throw new Error('ACP event stream ended before the prompt completed');
         if (next.value.kind === 'acp') {
           if (next.value.value.kind === 'stop') {
@@ -136,7 +138,7 @@ export class AcpAdapter implements AgentAdapter {
     } catch (error) {
       if (signal?.aborted) {
         await this.cancel(actualId).catch(() => {});
-        yield { type: 'final', text: '', stopReason: 'cancelled' };
+        yield { type: 'final', text: output, stopReason: 'cancelled' };
       } else {
         yield { type: 'error', text: error instanceof Error ? error.message : String(error) };
       }
@@ -151,6 +153,7 @@ export class AcpAdapter implements AgentAdapter {
     const actualId = this.sessionIds.get(sessionId) ?? sessionId;
     await this.connection!.agent.notify(methods.agent.session.cancel, { sessionId: actualId });
     for (const [requestId, pending] of this.permissions) {
+      if (pending.sessionId !== actualId) continue;
       pending.resolve({ outcome: { outcome: 'cancelled' } });
       this.permissions.delete(requestId);
     }
@@ -212,7 +215,7 @@ export class AcpAdapter implements AgentAdapter {
         },
       });
       return new Promise<RequestPermissionResponse>((resolve) => {
-        this.permissions.set(requestId, { resolve });
+        this.permissions.set(requestId, { sessionId: params.sessionId, resolve });
       });
     });
     const connection = app.connect(stream);
@@ -227,7 +230,7 @@ export class AcpAdapter implements AgentAdapter {
     const initialized = await withTimeout(
       connection.agent.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
-        clientInfo: { name: 'dsh-agent-link', version: '0.1.0' },
+        clientInfo: { name: 'dsh-agent-link', version: VERSION },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       }),
       this.config.connectTimeoutMs ?? 30_000,
@@ -248,18 +251,8 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   private openStdio() {
-    const command = this.config.acpCommand!;
-    const args = this.config.acpArgs ?? [];
-    const ssh = this.transport.kind === 'ssh';
-    const child = spawn(
-      ssh ? 'ssh' : command,
-      ssh
-        ? [...sshArguments(this.config).slice(0, -3), this.config.ssh!, '--', command, ...args].map((argument) =>
-            /[\s'"]/.test(argument) ? `'${argument.replaceAll("'", "'\\''")}'` : argument,
-          )
-        : args,
-      { stdio: ['pipe', 'pipe', 'inherit'] },
-    );
+    const spec = acpStdioSpawnSpec(this.config);
+    const child = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'inherit'] });
     this.child = child;
     child.on('error', (error) => {
       for (const queue of this.queues.values()) queue.fail(error);
@@ -318,15 +311,32 @@ function acpWebSocketConstructor(transport: Transport): WebSocketConstructor {
   };
 }
 
+export function acpStdioSpawnSpec(config: AgentConfig): { command: string; args: string[] } {
+  const command = config.acpCommand!;
+  const args = config.acpArgs ?? [];
+  if ((config.transport ?? 'ssh') !== 'ssh') return { command, args };
+  const remoteCommand = [command, ...args].map(shellQuote).join(' ');
+  return {
+    command: 'ssh',
+    args: [...sshBaseArguments(config), config.ssh!, '--', remoteCommand],
+  };
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string, signal?: AbortSignal): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   const abort = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    signal?.addEventListener('abort', () => reject(new Error(`${label} aborted`)), { once: true });
+    if (signal?.aborted) reject(new Error(`${label} aborted`));
+    else if (signal) {
+      onAbort = () => reject(new Error(`${label} aborted`));
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
   try {
     return await Promise.race([promise, abort]);
   } finally {
     clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
   }
 }

@@ -54,12 +54,25 @@ describe('configuration and policy', () => {
     expect(args.slice(0, 2)).toEqual(['-F', '/tmp/e2e_ssh_config']);
   });
 
-  it('redacts credentials recursively', () => {
+  it('redacts credentials recursively and safely handles circular objects', () => {
     expect(redactText('Bearer abcdefghijklmnop')).toBe('[REDACTED]');
-    const value = redact({ token: 'secret', nested: { text: 'Bearer abcdefghijklmnop' }, safe: 42 });
-    expect(value.token).toBe('[REDACTED]');
-    expect(value.nested.text).not.toContain('abcdefghijklmnop');
+    expect(redactText('Basic dXNlcjpwYXNzd29yZA==')).toBe('[REDACTED]');
+    const cyclic: Record<string, unknown> = {
+      access_token: 'abc',
+      nested: { text: 'Bearer abcdefghijklmnop' },
+      safe: 42,
+    };
+    cyclic.self = cyclic;
+    const value = redact(cyclic);
+    expect(value.access_token).toBe('[REDACTED]');
+    expect((value.nested as { text: string }).text).not.toContain('abcdefghijklmnop');
     expect(value.safe).toBe(42);
+    expect(value.self).toBe('[Circular]');
+  });
+
+  it('rejects wildcard MCP hosts', () => {
+    expect(() => normalizeConfig({ mcp: { enabled: true, host: '0.0.0.0' } })).toThrow(/0\.0\.0\.0/);
+    expect(() => normalizeConfig({ mcp: { enabled: true, host: '::' } })).toThrow(/::/);
   });
 
   it('maps common SSH failures to actionable hints', () => {

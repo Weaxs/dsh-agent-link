@@ -83,4 +83,24 @@ describe('read-only MCP endpoint', () => {
     const denied = await rpc('tools/call', { name: 'dsh_session_read', arguments: { sessionId: 'private' } });
     expect(denied.error.message).toMatch(/not shared/);
   });
+
+  it('rejects wildcard hosts, oversized bodies with 413, and oversized batches', async () => {
+    const wildcard = new McpServer({ host: '0.0.0.0', port: 0, token: 'test-token' }, sessions);
+    await expect(wildcard.start()).rejects.toThrow(/0\.0\.0\.0/);
+
+    await start();
+    const oversized = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+      body: 'x'.repeat(1_000_001),
+    });
+    expect(oversized.status).toBe(413);
+
+    const bigBatch = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+      body: JSON.stringify(Array.from({ length: 51 }, (_, i) => ({ jsonrpc: '2.0', id: i, method: 'ping' }))),
+    });
+    expect(bigBatch.status).toBe(400);
+  });
 });

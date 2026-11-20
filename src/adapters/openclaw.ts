@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { secret } from '../config.js';
 import { transportFor } from '../transports/http.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
+import { VERSION } from '../version.js';
 import { GatewayWebSocket } from './gateway-ws.js';
 import { loadOrCreateIdentity, signClaim } from './openclaw-identity.js';
 
@@ -70,60 +71,81 @@ export class OpenClawAdapter implements AgentAdapter {
     if (!runId) throw new Error(`OpenClaw did not return a run id: ${JSON.stringify(started)}`);
     let completed = this.gateway.request('agent.wait', { runId }, 1_800_000);
     completed.catch(() => {});
+    const waitAbort = new AbortController();
+    const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+    const aborted = new Promise<{ kind: 'aborted' }>((resolve) => {
+      if (waitAbort.signal.aborted) resolve({ kind: 'aborted' });
+      else waitAbort.signal.addEventListener('abort', () => resolve({ kind: 'aborted' }), { once: true });
+    });
+    let next = this.gateway.nextEvent(waitAbort.signal);
+    next.catch(() => {});
     let output = '';
-    while (true) {
-      const next = this.gateway.nextEvent();
-      const result = await Promise.race([
-        completed.then((value) => ({ kind: 'done' as const, value })),
-        next.then((value) => ({ kind: 'event' as const, value })),
-      ]);
-      if (result.kind === 'done') {
-        if (result.value.status === 'pending' || result.value.status === 'timeout') {
-          completed = this.gateway.request('agent.wait', { runId }, 1_800_000);
-          completed.catch(() => {});
-          continue;
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          await this.cancel(sessionKey).catch(() => {});
+          return;
         }
-        const textResult = textOf(
-          result.value.output ??
-            result.value.result ??
-            result.value.message ??
-            result.value.terminalReply ??
-            result.value.terminalReceipt ??
-            result.value,
-        );
-        yield { type: 'final', text: textResult || output, stopReason: String(result.value.status ?? 'completed') };
-        return;
+        const result = await Promise.race([
+          completed.then((value) => ({ kind: 'done' as const, value })),
+          next.then((value) => ({ kind: 'event' as const, value })),
+          aborted,
+        ]);
+        if (result.kind === 'aborted') {
+          await this.cancel(sessionKey).catch(() => {});
+          return;
+        }
+        if (result.kind === 'done') {
+          if (result.value.status === 'pending' || result.value.status === 'timeout') {
+            completed = this.gateway.request('agent.wait', { runId }, 1_800_000);
+            completed.catch(() => {});
+            continue;
+          }
+          const textResult = textOf(
+            result.value.output ??
+              result.value.result ??
+              result.value.message ??
+              result.value.terminalReply ??
+              result.value.terminalReceipt ??
+              result.value,
+          );
+          yield { type: 'final', text: textResult || output, stopReason: String(result.value.status ?? 'completed') };
+          return;
+        }
+        next = this.gateway.nextEvent(waitAbort.signal);
+        next.catch(() => {});
+        if (result.value.done) throw new Error('OpenClaw event stream ended before the run completed');
+        const frame = result.value.value;
+        const payload = frame.payload ?? frame.data ?? frame;
+        const eventRun = String(payload.runId ?? payload.run_id ?? '');
+        if (eventRun && eventRun !== runId) continue;
+        const eventName = String(payload.event ?? payload.type ?? frame.event ?? '');
+        const delta = textOf(payload.delta ?? payload.textDelta ?? payload.content);
+        if (delta) {
+          output += delta;
+          yield { type: 'text', text: delta };
+        }
+        if (/approval|permission/.test(eventName)) {
+          yield {
+            type: 'approval',
+            requestId: String(payload.requestId ?? payload.id ?? ''),
+            text: String(payload.description ?? payload.command ?? 'Approval requested'),
+            choices: [],
+          };
+        } else if (/tool/.test(eventName)) {
+          yield {
+            type: 'tool',
+            phase: /end|complete|finish/.test(eventName) ? 'end' : 'start',
+            name: String(payload.name ?? payload.toolName ?? 'tool'),
+          };
+        }
+        if (sessionKey) (payload as Record<string, unknown>).sessionKey ??= sessionKey;
       }
-      if (result.value.done) throw new Error('OpenClaw event stream ended before the run completed');
-      const frame = result.value.value;
-      const payload = frame.payload ?? frame.data ?? frame;
-      const eventRun = String(payload.runId ?? payload.run_id ?? '');
-      if (eventRun && eventRun !== runId) continue;
-      const eventName = String(payload.event ?? payload.type ?? frame.event ?? '');
-      const delta = textOf(payload.delta ?? payload.textDelta ?? payload.content);
-      if (delta) {
-        output += delta;
-        yield { type: 'text', text: delta };
-      }
-      if (/approval|permission/.test(eventName)) {
-        yield {
-          type: 'approval',
-          requestId: String(payload.requestId ?? payload.id ?? ''),
-          text: String(payload.description ?? payload.command ?? 'Approval requested'),
-          choices: [],
-        };
-      } else if (/tool/.test(eventName)) {
-        yield {
-          type: 'tool',
-          phase: /end|complete|finish/.test(eventName) ? 'end' : 'start',
-          name: String(payload.name ?? payload.toolName ?? 'tool'),
-        };
-      }
-      if (sessionKey) (payload as Record<string, unknown>).sessionKey ??= sessionKey;
-      if (signal?.aborted) {
-        await this.cancel(sessionKey, signal).catch(() => {});
-        return;
-      }
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      waitAbort.abort();
     }
   }
 
@@ -190,7 +212,7 @@ export class OpenClawAdapter implements AgentAdapter {
     return this.gateway.request('connect', {
       minProtocol: 4,
       maxProtocol: 4,
-      client: { id: 'cli', version: '0.1.0', platform: process.platform, mode: 'cli' },
+      client: { id: 'cli', version: VERSION, platform: process.platform, mode: 'cli' },
       role: 'operator',
       scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],
       auth: { token },
@@ -231,10 +253,16 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 async function abortable(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
   if (!signal) return promise;
   if (signal.aborted) throw new Error('request aborted');
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      signal.addEventListener('abort', () => reject(new Error('request aborted')), { once: true }),
-    ),
-  ]);
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error('request aborted'));
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }

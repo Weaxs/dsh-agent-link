@@ -2,6 +2,7 @@ import http, { type IncomingMessage, type RequestOptions } from 'node:http';
 import https from 'node:https';
 import type { Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import type { AgentConfig, HttpRequest, HttpResponse, Transport } from '../types.js';
 import { openSshSocket } from './stdio-socket.js';
 
@@ -16,11 +17,15 @@ export class NodeHttpTransport implements Transport {
   async request(input: HttpRequest): Promise<HttpResponse> {
     const response = await this.stream(input);
     try {
-      let text = '';
+      const chunks: Buffer[] = [];
+      let bytes = 0;
       for await (const chunk of response) {
-        text += chunk.toString('utf8');
-        if (text.length > MAX_BODY) throw new Error(`response exceeds ${MAX_BODY} bytes`);
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += buffer.length;
+        if (bytes > MAX_BODY) throw new Error(`response exceeds ${MAX_BODY} bytes`);
+        chunks.push(buffer);
       }
+      const text = Buffer.concat(chunks).toString('utf8');
       const headers = Object.fromEntries(
         Object.entries(response.headers).filter(([key]) => key.toLowerCase() !== 'authorization'),
       );
@@ -53,18 +58,27 @@ export class NodeHttpTransport implements Transport {
     const driver = secure ? https : http;
     return new Promise<IncomingMessage>((resolve, reject) => {
       const request = driver.request(options, (response) => {
+        request.setTimeout(0);
         if ((response.statusCode ?? 500) >= 400) {
+          const decoder = new StringDecoder('utf8');
           let detail = '';
           response.on('data', (chunk: Buffer) => {
-            detail = (detail + chunk.toString('utf8')).slice(-16_384);
+            detail = (detail + decoder.write(chunk)).slice(-16_384);
           });
-          response.on('end', () =>
-            reject(new Error(`HTTP ${response.statusCode}: ${detail || response.statusMessage || 'request failed'}`)),
-          );
+          response.on('error', reject);
+          response.on('end', () => {
+            detail = (detail + decoder.end()).slice(-16_384);
+            reject(new Error(`HTTP ${response.statusCode}: ${detail || response.statusMessage || 'request failed'}`));
+          });
           return;
         }
         resolve(response);
       });
+      if (this.kind !== 'ssh' && this.config.connectTimeoutMs) {
+        request.setTimeout(this.config.connectTimeoutMs, () => {
+          request.destroy(new Error(`request timed out after ${this.config.connectTimeoutMs}ms`));
+        });
+      }
       request.on('error', reject);
       const signal = input.signal;
       const abort = () => request.destroy(new Error('request aborted'));

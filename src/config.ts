@@ -22,6 +22,9 @@ export function normalizeConfig(
     throw new ConfigError('jobTimeoutMs must be between 1000 and 86400000');
   }
   if (input.mcp?.port !== undefined) port(input.mcp.port, 'mcp.port');
+  if (input.mcp?.host === '0.0.0.0' || input.mcp?.host === '::') {
+    throw new ConfigError('mcp.host must be loopback or a specific trusted address, never 0.0.0.0 or ::');
+  }
   return { ...input, agents, jobTimeoutMs: timeout };
 }
 

@@ -12,7 +12,7 @@ class FakeAdapter implements AgentAdapter {
   async listSessions() {
     return [];
   }
-  async *prompt(session: string | undefined): AsyncIterable<AgentEvent> {
+  async *prompt(session: string | undefined, _text?: string, _signal?: AbortSignal): AsyncIterable<AgentEvent> {
     void session;
     yield { type: 'text', text: 'part ' };
     yield { type: 'approval', requestId: 'r1', choices: ['once', 'deny'], text: 'Run bash?' };
@@ -46,11 +46,35 @@ describe('AgentManager', () => {
     expect(manager.get(job.id).pendingApproval).toBeUndefined();
   });
 
-  it('cancels active work and rejects unknown agents', async () => {
-    const adapter = new FakeAdapter('remote');
+  it('cancels active work, aborts local stream and rejects unknown agents', async () => {
+    let aborted = false;
+    class HangingAdapter extends FakeAdapter {
+      override async *prompt(
+        _session: string | undefined,
+        _text: string,
+        signal?: AbortSignal,
+      ): AsyncIterable<AgentEvent> {
+        yield { type: 'text', text: 'partial' };
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) {
+            aborted = true;
+            resolve();
+            return;
+          }
+          signal?.addEventListener('abort', () => {
+            aborted = true;
+            resolve();
+          });
+        });
+      }
+    }
+    const adapter = new HangingAdapter('remote');
     const manager = new AgentManager([config], 10_000, () => adapter);
     const job = manager.start('remote', 'work', 'session-1');
     expect((await manager.cancel(job.id)).status).toBe('cancelled');
+    const settled = await manager.wait(job.id);
+    expect(settled.status).toBe('cancelled');
+    expect(aborted).toBe(true);
     expect(adapter.cancelled).toBe(true);
     expect(() => manager.start('missing', 'x', undefined)).toThrow(/Unknown agent/);
   });

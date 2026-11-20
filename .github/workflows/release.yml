@@ -36,7 +36,7 @@ jobs:
           cd "$stage/package"
           npm pkg set name=dsh-agent-link
           sed -i 's|@weaxs/dsh-agent-link|dsh-agent-link|g' cordis.patch.yml
-          grep -q "name: 'dsh-agent-link'" cordis.patch.yml
+          grep -Eq 'name: ["'\'']dsh-agent-link["'\'']' cordis.patch.yml
           test -f dist/index.js
           test -f icon.svg
           test -f locale/en.json
