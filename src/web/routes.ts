@@ -1,9 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis';
+import { normalizeConfig } from '../config.js';
 import { runDoctor } from '../doctor.js';
 import type { AgentManager } from '../manager.js';
 import type { McpServer } from '../mcp/server.js';
 import type { SessionControllerLike } from '../mcp/session-service.js';
 import { redact } from '../policy/redact.js';
+import { loadStoredAgents, saveStoredAgents } from '../store.js';
+import type { AgentConfig } from '../types.js';
 import { VERSION } from '../version.js';
 
 interface ConnectionHostFace {
@@ -24,6 +27,8 @@ export const WEB_ROUTES = {
   cancel: '/api/dsh-knot/cancel',
   sessions: '/api/dsh-knot/sessions',
   mcpShare: '/api/dsh-knot/mcp-share',
+  agentSave: '/api/dsh-knot/agent-save',
+  agentDelete: '/api/dsh-knot/agent-delete',
 } as const;
 
 function jsonReply(value: unknown, status = 200): Response {
@@ -161,6 +166,55 @@ export function registerWebRoutes(
         if (!sessionId) return errorReply('sessionId is required', 400);
         mcp.setAllowed(sessionId, allow);
         return jsonReply({ ok: true, value: { allowSessions: mcp.listAllowed() } });
+      } catch (error) {
+        return errorReply(error instanceof Error ? error.message : String(error), 400);
+      }
+    });
+
+    register(WEB_ROUTES.agentSave, async (request) => {
+      try {
+        const body = await parseBody(request);
+        const id = typeof body.id === 'string' ? body.id.trim() : '';
+        const existing = id ? manager.getConfig(id) : undefined;
+        const incomingToken = typeof body.token === 'string' ? body.token.trim() : '';
+        const candidate: AgentConfig = {
+          id,
+          kind: body.kind as AgentConfig['kind'],
+          transport: (body.transport as AgentConfig['transport']) ?? 'ssh',
+          ...(typeof body.ssh === 'string' && body.ssh.trim() ? { ssh: body.ssh.trim() } : {}),
+          ...(typeof body.host === 'string' && body.host.trim() ? { host: body.host.trim() } : {}),
+          ...(body.port !== undefined && body.port !== '' ? { port: Number(body.port) } : {}),
+          ...(body.tls === true ? { tls: true } : {}),
+          ...(incomingToken ? { token: incomingToken } : existing?.token ? { token: existing.token } : {}),
+          ...(typeof body.model === 'string' && body.model.trim() ? { model: body.model.trim() } : {}),
+          ...(body.acpTransport === 'stdio' || body.acpTransport === 'websocket'
+            ? { acpTransport: body.acpTransport }
+            : {}),
+          ...(typeof body.acpCommand === 'string' && body.acpCommand.trim()
+            ? { acpCommand: body.acpCommand.trim() }
+            : {}),
+          ...(Array.isArray(body.acpArgs) ? { acpArgs: body.acpArgs.map(String) } : {}),
+        };
+        const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
+        const stored = loadStoredAgents().filter((item) => item.id !== normalized!.id);
+        stored.push(normalized!);
+        saveStoredAgents(stored);
+        await manager.upsert(normalized!);
+        return jsonReply({ ok: true, value: { agents: manager.list() } });
+      } catch (error) {
+        return errorReply(error instanceof Error ? error.message : String(error), 400);
+      }
+    });
+
+    register(WEB_ROUTES.agentDelete, async (request) => {
+      try {
+        const body = await parseBody(request);
+        const id = typeof body.id === 'string' ? body.id.trim() : '';
+        if (!id) return errorReply('id is required', 400);
+        const stored = loadStoredAgents().filter((item) => item.id !== id);
+        saveStoredAgents(stored);
+        await manager.remove(id);
+        return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
       }

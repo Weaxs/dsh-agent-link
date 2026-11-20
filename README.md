@@ -86,86 +86,61 @@ Then add the absolute repository directory through **Plugins → Add plugin** an
 
 ---
 
-## Quick Start
+## Quick Start (Frontend UI — No Environment Variables Required)
 
-### 1. Connect any ACP v1 agent (stdio or WebSocket)
+You can configure as many agents as you need directly from the **DSH Knot Web UI** (or **`Settings → Plugins → DSH Knot`**), with each agent storing its own endpoint and token independently:
 
-An ACP-compatible agent needs no bridge. Use `acpTransport: stdio` locally or over SSH:
+1. Open **DSH Knot / 远端互联** in the left sidebar of `dsh web`.
+2. Click **`+ Add Agent` / `+ 添加助手`**.
+3. Choose the protocol (**ACP v1**, **Hermes**, **OpenClaw**, or **Remote DSH**), transport (**SSH**, **Direct / Tailscale**, or **Local**), host/SSH alias, and paste that agent's token directly into the password field.
+4. Click **Save** — the agent is activated immediately and persisted under `$DSH_HOME/knot/agents.json` with `0600` file permissions (tokens are never sent back to the browser).
 
-```yaml
-- id: claude-box
-  kind: acp
-  transport: ssh
-  ssh: dev-vm
-  acpTransport: stdio
-  acpCommand: /usr/local/bin/claude-code-acp
-  acpArgs: []
-```
+### Alternative: Declarative `cordis.patch.yml`
 
-Or connect to an ACP WebSocket endpoint (default `/acp`, optional `DSH_KNOT_ACP_TOKEN`):
-
-```yaml
-- id: unified-agent
-  kind: acp
-  transport: ssh
-  ssh: gpu-box
-  port: 18792
-```
-
-### 2. Connect Hermes, OpenClaw, or Remote dsh
-
-Configure agents in `Settings → Plugins → DSH Knot` (auto-generated via `schemastery`) or in your profile's `cordis.patch.yml`:
+If you prefer declarative configuration, add agents under `knot` in `cordis.patch.yml` (each agent can specify its own `token` or an optional `tokenEnv` fallback):
 
 ```yaml
 - id: knot
   name: "@weaxs/dsh-knot"
   config:
     agents:
-      - id: hermes-gpu
+      - id: claude-box
+        kind: acp
+        transport: ssh
+        ssh: dev-vm
+        acpTransport: stdio
+        acpCommand: /usr/local/bin/claude-code-acp
+      - id: hermes-gpu-1
         kind: hermes
         transport: ssh
-        ssh: gpu-box
+        ssh: gpu-box-1
         port: 8642
+        token: your-first-hermes-token
+      - id: hermes-gpu-2
+        kind: hermes
+        transport: ssh
+        ssh: gpu-box-2
+        port: 8642
+        token: your-second-hermes-token
       - id: claw-prod
         kind: openclaw
         transport: direct
         host: claw-server
         port: 18789
+        token: your-openclaw-token
       - id: dsh-remote
         kind: dsh
         transport: ssh
         ssh: dsh-box
         port: 18790
-        model: your-model-id
-        dshProvider: openai
-```
-
-Set only the gateway tokens you use in the local environment where dsh runs:
-
-```bash
-export HERMES_API_KEY='your-hermes-api-key'
-export OPENCLAW_GATEWAY_TOKEN='your-openclaw-gateway-token'
-export DSH_GATEWAY_TOKEN='launch-token-from-remote-dsh-web-url'
+        token: your-remote-dsh-launch-token
 ```
 
 > **Note:** OpenClaw creates one persistent Ed25519 device identity per agent under `$DSH_HOME/knot/devices` (mode `0600`). Approve that device once in OpenClaw. For SSH host aliases and troubleshooting, see [docs/SSH.md](docs/SSH.md).
 
-### 3. Optional: Run the `dsh-knot-acp` bridge
+### Verify with `knot_doctor`
 
-Expose a loopback Hermes, OpenClaw, or remote dsh gateway over standard ACP v1 (WebSocket or `DSH_KNOT_ACP_STDIO=1`):
-
-```bash
-export DSH_KNOT_NATIVE_KIND=hermes
-export DSH_KNOT_NATIVE_TOKEN='your-native-gateway-token'
-export DSH_KNOT_ACP_TOKEN='a-long-random-acp-token'
-dsh-knot-acp
-```
-
-The listener defaults to `127.0.0.1:18792` (`DSH_KNOT_ACP_HOST` / `DSH_KNOT_ACP_PORT`). Non-loopback listeners require `DSH_KNOT_ACP_TOKEN`.
-
-### 4. Verify with `knot_doctor`
-
-Ask dsh or click **Test all connections** in the Web UI:
+Click **Test all connections** in the Web UI or ask dsh:
 
 ```text
 Use knot_doctor to check every configured agent.

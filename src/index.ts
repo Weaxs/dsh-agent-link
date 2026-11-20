@@ -4,6 +4,7 @@ import { normalizeConfig } from './config.js';
 import { AgentManager } from './manager.js';
 import { McpServer } from './mcp/server.js';
 import type { SessionControllerLike } from './mcp/session-service.js';
+import { loadStoredAgents } from './store.js';
 import { registerTools } from './tools.js';
 import type { PluginConfig } from './types.js';
 import { registerWebRoutes } from './web/routes.js';
@@ -22,7 +23,8 @@ export const Config = Schema.object({
       host: Schema.string().description('Target host for direct or local transport.'),
       port: Schema.number().description('Target TCP port (defaults per protocol).'),
       tls: Schema.boolean().description('Use HTTPS/WSS for direct transport.'),
-      tokenEnv: Schema.string().description('Environment variable holding the gateway bearer/launch token.'),
+      token: Schema.string().role('secret').description('Gateway bearer or launch token for this agent.'),
+      tokenEnv: Schema.string().description('Optional environment variable fallback holding the token.'),
       model: Schema.string().description('Optional remote model override.'),
       acpTransport: Schema.union(['websocket', 'stdio']).description('ACP transport mode (websocket or stdio).'),
       acpCommand: Schema.string().description('Executable path for ACP stdio agents.'),
@@ -41,9 +43,10 @@ export const Config = Schema.object({
     enabled: Schema.boolean().default(false).description('Enable the separate read-only MCP listener.'),
     host: Schema.string().default('127.0.0.1').description('Loopback or Tailscale IP (never 0.0.0.0 or ::).'),
     port: Schema.number().min(1).max(65_535).default(19_400).description('Read-only MCP listener port.'),
+    token: Schema.string().role('secret').description('Bearer token protecting the read-only MCP listener.'),
     tokenEnv: Schema.string()
       .default('DSH_KNOT_TOKEN')
-      .description('Environment variable holding the MCP bearer token.'),
+      .description('Optional environment variable fallback holding the MCP bearer token.'),
     allowSessions: Schema.array(Schema.string())
       .default([])
       .description('Exact local dsh session IDs permitted for read-only MCP access (empty shares nothing).'),
@@ -52,7 +55,14 @@ export const Config = Schema.object({
 
 export async function apply(ctx: Context, input: PluginConfig = {}): Promise<void> {
   const config = normalizeConfig(input);
-  const manager = new AgentManager(config.agents, config.jobTimeoutMs);
+  const stored = loadStoredAgents();
+  const merged = [...config.agents];
+  for (const agent of stored) {
+    const idx = merged.findIndex((item) => item.id === agent.id);
+    if (idx >= 0) merged[idx] = agent;
+    else merged.push(agent);
+  }
+  const manager = new AgentManager(merged, config.jobTimeoutMs);
   registerTools(ctx, manager);
   const sessions = (ctx as unknown as { sessionController?: SessionControllerLike }).sessionController;
   let mcp: McpServer | undefined;

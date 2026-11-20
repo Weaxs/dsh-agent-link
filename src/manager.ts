@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AcpAdapter } from './adapters/acp.js';
 import { createNativeAdapter, createNativeSessionId } from './adapters/native.js';
+import { secret } from './config.js';
 import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.js';
 
 export type AdapterFactory = (config: AgentConfig) => AgentAdapter;
@@ -9,20 +10,65 @@ const MAX_JOBS = 200;
 
 export class AgentManager {
   readonly adapters = new Map<string, AgentAdapter>();
+  readonly configs: AgentConfig[];
+  private readonly factory: AdapterFactory;
   private readonly jobs = new Map<string, AgentJob>();
   private readonly completions = new Map<string, Promise<AgentJob>>();
   private readonly controllers = new Map<string, AbortController>();
 
   constructor(
-    readonly configs: AgentConfig[],
+    configs: AgentConfig[],
     private readonly timeoutMs = 1_800_000,
     factory: AdapterFactory = defaultFactory,
   ) {
-    for (const config of configs) this.adapters.set(config.id, factory(config));
+    this.configs = [...configs];
+    this.factory = factory;
+    for (const config of this.configs) this.adapters.set(config.id, this.factory(config));
   }
 
-  list(): Array<Pick<AgentConfig, 'id' | 'kind' | 'transport' | 'host' | 'ssh' | 'port'>> {
-    return this.configs.map(({ id, kind, transport, host, ssh, port }) => ({ id, kind, transport, host, ssh, port }));
+  list(): Array<
+    Pick<
+      AgentConfig,
+      'id' | 'kind' | 'transport' | 'host' | 'ssh' | 'port' | 'acpTransport' | 'acpCommand' | 'model'
+    > & {
+      hasToken: boolean;
+    }
+  > {
+    return this.configs.map(({ id, kind, transport, host, ssh, port, acpTransport, acpCommand, model, ...rest }) => ({
+      id,
+      kind,
+      transport,
+      host,
+      ssh,
+      port,
+      acpTransport,
+      acpCommand,
+      model,
+      hasToken: Boolean(secret({ id, kind, transport, host, ssh, port, acpTransport, acpCommand, model, ...rest })),
+    }));
+  }
+
+  getConfig(id: string): AgentConfig | undefined {
+    return this.configs.find((item) => item.id === id);
+  }
+
+  async upsert(config: AgentConfig): Promise<void> {
+    const existing = this.adapters.get(config.id);
+    if (existing) await existing.close().catch(() => {});
+    const index = this.configs.findIndex((item) => item.id === config.id);
+    if (index >= 0) this.configs[index] = config;
+    else this.configs.push(config);
+    this.adapters.set(config.id, this.factory(config));
+  }
+
+  async remove(id: string): Promise<boolean> {
+    const existing = this.adapters.get(id);
+    if (!existing) return false;
+    this.adapters.delete(id);
+    const index = this.configs.findIndex((item) => item.id === id);
+    if (index >= 0) this.configs.splice(index, 1);
+    await existing.close().catch(() => {});
+    return true;
   }
 
   adapter(id: string): AgentAdapter {

@@ -38,6 +38,24 @@ interface AgentSummary {
   host?: string;
   ssh?: string;
   port?: number;
+  acpTransport?: 'websocket' | 'stdio';
+  acpCommand?: string;
+  model?: string;
+  hasToken?: boolean;
+}
+
+interface AgentFormState {
+  editing: boolean;
+  id: string;
+  kind: 'hermes' | 'openclaw' | 'dsh' | 'acp';
+  transport: 'ssh' | 'direct' | 'local';
+  ssh: string;
+  host: string;
+  port: string;
+  token: string;
+  model: string;
+  acpTransport: 'websocket' | 'stdio';
+  acpCommand: string;
 }
 
 interface JobSummary {
@@ -111,7 +129,28 @@ const DICTS: Record<string, Record<string, string>> = {
     runningNow: '正在后台执行',
     stopTask: '停止',
     agentsHeading: '已连接的远端助手',
-    agentsEmpty: '尚未配置远端助手，请在「设置 → 插件 → DSH Knot」中添加。',
+    agentsEmpty: '尚未配置远端助手，点击右上角「+ 添加助手」即可直接配置（无需环境变量）。',
+    addAgent: '+ 添加助手',
+    editAgent: '编辑',
+    deleteAgent: '删除',
+    saveAgent: '保存',
+    cancelBtn: '取消',
+    modalAddTitle: '添加远端助手',
+    modalEditTitle: '编辑远端助手',
+    fieldId: '助手 ID',
+    fieldKind: '协议类型',
+    fieldTransport: '连接方式',
+    fieldSsh: 'SSH 主机别名（来自 ~/.ssh/config）',
+    fieldHost: '主机地址（IP 或 Tailscale 域名）',
+    fieldPort: '端口（留空使用默认端口）',
+    fieldToken: 'Token / API Key（独立保存，无需环境变量）',
+    fieldTokenKeep: '留空则保留当前已保存的 Token',
+    fieldModel: '默认模型（可选）',
+    fieldAcpTransport: 'ACP 传输方式',
+    fieldAcpCommand: 'ACP stdio 命令路径',
+    tokenConfigured: '已配密钥',
+    savedAgentToast: '助手配置已保存并立即生效',
+    deletedAgentToast: '已移除该助手',
     viewHistory: '看历史',
     details: '连接详情',
     hide: '收起',
@@ -154,7 +193,28 @@ const DICTS: Record<string, Record<string, string>> = {
     runningNow: 'working in background',
     stopTask: 'Stop',
     agentsHeading: 'Connected Remote Agents',
-    agentsEmpty: 'No remote agents configured yet. Add them in Settings → Plugins → DSH Knot.',
+    agentsEmpty: 'No remote agents configured yet. Click "+ Add Agent" above (no environment variables required).',
+    addAgent: '+ Add Agent',
+    editAgent: 'Edit',
+    deleteAgent: 'Remove',
+    saveAgent: 'Save',
+    cancelBtn: 'Cancel',
+    modalAddTitle: 'Add Remote Agent',
+    modalEditTitle: 'Edit Remote Agent',
+    fieldId: 'Agent ID',
+    fieldKind: 'Protocol',
+    fieldTransport: 'Transport',
+    fieldSsh: 'SSH host alias (from ~/.ssh/config)',
+    fieldHost: 'Host (IP or Tailscale hostname)',
+    fieldPort: 'Port (leave blank for default)',
+    fieldToken: 'Token / API Key (stored per agent, 0600)',
+    fieldTokenKeep: 'Leave blank to keep existing token',
+    fieldModel: 'Model override (optional)',
+    fieldAcpTransport: 'ACP Transport',
+    fieldAcpCommand: 'ACP stdio command',
+    tokenConfigured: 'Token set',
+    savedAgentToast: 'Agent saved and activated',
+    deletedAgentToast: 'Agent removed',
     viewHistory: 'History',
     details: 'Details',
     hide: 'Hide',
@@ -214,6 +274,10 @@ body[data-ds-dark-theme] .dk-root { background: var(--dsw-alias-bg-layer-0, #0e1
 .dk-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 6px; border-bottom: 1px solid var(--dsw-alias-border-l3, rgba(0,0,0,0.06)); }
 .dk-list-row:last-child { border-bottom: 0; }
 .dk-toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 9999; padding: 7px 14px; border-radius: 999px; font-size: 12px; background: var(--dsw-alias-label-primary, #111827); color: var(--dsw-alias-bg-layer-1, #ffffff); box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+.dk-modal-bg { position: fixed; inset: 0; z-index: 9990; background: rgba(0,0,0,0.38); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dk-modal { width: 100%; max-width: 480px; background: var(--dsw-alias-bg-layer-1, #ffffff); border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.12)); border-radius: 14px; padding: 18px 20px; box-shadow: 0 12px 36px rgba(0,0,0,0.22); display: flex; flex-direction: column; gap: 12px; }
+.dk-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.dk-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 960px) { .dk-row1, .dk-row3, .dk-agents-grid { grid-template-columns: 1fr; } }
 `;
 
@@ -261,6 +325,7 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const [historySearch, setHistorySearch] = React.useState('');
     const [historyLimit, setHistoryLimit] = React.useState(6);
     const [toast, setToast] = React.useState<string | null>(null);
+    const [form, setForm] = React.useState<AgentFormState | null>(null);
 
     const t = (key: string): string => DICTS[lang]?.[key] ?? DICTS.en?.[key] ?? key;
 
@@ -348,6 +413,71 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
     const toggleShare = async (sessionId: string, allow: boolean) => {
       try {
         await apiPost(ctx, '/api/dsh-knot/mcp-share', { sessionId, allow });
+        await refreshState();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    const openAddForm = () => {
+      setForm({
+        editing: false,
+        id: '',
+        kind: 'acp',
+        transport: 'ssh',
+        ssh: '',
+        host: '127.0.0.1',
+        port: '',
+        token: '',
+        model: '',
+        acpTransport: 'websocket',
+        acpCommand: '',
+      });
+    };
+
+    const openEditForm = (agent: AgentSummary) => {
+      setForm({
+        editing: true,
+        id: agent.id,
+        kind: agent.kind,
+        transport: agent.transport ?? 'ssh',
+        ssh: agent.ssh ?? '',
+        host: agent.host ?? '127.0.0.1',
+        port: agent.port ? String(agent.port) : '',
+        token: '',
+        model: agent.model ?? '',
+        acpTransport: agent.acpTransport ?? 'websocket',
+        acpCommand: agent.acpCommand ?? '',
+      });
+    };
+
+    const saveAgentForm = async () => {
+      if (!form) return;
+      try {
+        await apiPost(ctx, '/api/dsh-knot/agent-save', {
+          id: form.id,
+          kind: form.kind,
+          transport: form.transport,
+          ssh: form.ssh,
+          host: form.host,
+          port: form.port ? Number(form.port) : undefined,
+          token: form.token,
+          model: form.model,
+          acpTransport: form.kind === 'acp' ? form.acpTransport : undefined,
+          acpCommand: form.kind === 'acp' && form.acpTransport === 'stdio' ? form.acpCommand : undefined,
+        });
+        setForm(null);
+        showToast(t('savedAgentToast'));
+        await refreshState();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err));
+      }
+    };
+
+    const removeAgent = async (id: string) => {
+      try {
+        await apiPost(ctx, '/api/dsh-knot/agent-delete', { id });
+        showToast(t('deletedAgentToast'));
         await refreshState();
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err));
@@ -582,7 +712,12 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
         h(
           'div',
           { className: 'dk-card' },
-          h('div', { className: 'dk-card-head' }, h('span', { className: 'dk-card-title' }, t('agentsHeading'))),
+          h(
+            'div',
+            { className: 'dk-card-head' },
+            h('span', { className: 'dk-card-title' }, t('agentsHeading')),
+            h('button', { className: 'dk-btn dk-btn-primary', onClick: openAddForm }, t('addAgent')),
+          ),
           filteredAgents.length === 0
             ? h('div', { className: 'dk-muted', style: { padding: '12px 0' } }, t('agentsEmpty'))
             : h(
@@ -611,7 +746,12 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                       h(
                         'div',
                         null,
-                        h('div', { style: { fontWeight: 600, fontSize: '14px' } }, agent.id),
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                          h('span', { style: { fontWeight: 600, fontSize: '14px' } }, agent.id),
+                          agent.hasToken ? h('span', { className: 'dk-pill-ok' }, t('tokenConfigured')) : null,
+                        ),
                         h(
                           'div',
                           { className: 'dk-muted dk-mono', style: { marginTop: '2px' } },
@@ -620,11 +760,17 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                       ),
                       h(
                         'div',
-                        { style: { display: 'flex', gap: '8px' } },
+                        { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
                         h(
                           'button',
                           { className: 'dk-btn-link', onClick: () => void loadHistory(agent.id) },
                           t('viewHistory'),
+                        ),
+                        h('button', { className: 'dk-btn', onClick: () => openEditForm(agent) }, t('editAgent')),
+                        h(
+                          'button',
+                          { className: 'dk-btn dk-btn-danger', onClick: () => void removeAgent(agent.id) },
+                          t('deleteAgent'),
                         ),
                         h(
                           'button',
@@ -808,6 +954,200 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                   ),
           ),
         ),
+        form
+          ? h(
+              'div',
+              { className: 'dk-modal-bg', onClick: () => setForm(null) },
+              h(
+                'div',
+                {
+                  className: 'dk-modal',
+                  onClick: (e: { stopPropagation?: () => void }) => e.stopPropagation?.(),
+                },
+                h(
+                  'div',
+                  { className: 'dk-card-head', style: { marginBottom: 0 } },
+                  h('span', { className: 'dk-card-title' }, t(form.editing ? 'modalEditTitle' : 'modalAddTitle')),
+                ),
+                h(
+                  'div',
+                  { className: 'dk-field-row' },
+                  h(
+                    'label',
+                    { className: 'dk-field' },
+                    h('span', null, t('fieldId')),
+                    h('input', {
+                      className: 'dk-input dk-mono',
+                      disabled: form.editing,
+                      placeholder: 'hermes-gpu',
+                      value: form.id,
+                      onInput: (e: { target: { value: string } }) =>
+                        setForm((cur) => (cur ? { ...cur, id: e.target.value } : null)),
+                    }),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dk-field' },
+                    h('span', null, t('fieldKind')),
+                    h(
+                      'select',
+                      {
+                        className: 'dk-input',
+                        value: form.kind,
+                        onChange: (e: { target: { value: string } }) =>
+                          setForm((cur) => (cur ? { ...cur, kind: e.target.value as AgentFormState['kind'] } : null)),
+                      },
+                      h('option', { value: 'acp' }, 'ACP v1'),
+                      h('option', { value: 'hermes' }, 'Hermes'),
+                      h('option', { value: 'openclaw' }, 'OpenClaw'),
+                      h('option', { value: 'dsh' }, 'Remote DSH'),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'dk-field-row' },
+                  h(
+                    'label',
+                    { className: 'dk-field' },
+                    h('span', null, t('fieldTransport')),
+                    h(
+                      'select',
+                      {
+                        className: 'dk-input',
+                        value: form.transport,
+                        onChange: (e: { target: { value: string } }) =>
+                          setForm((cur) =>
+                            cur ? { ...cur, transport: e.target.value as AgentFormState['transport'] } : null,
+                          ),
+                      },
+                      h('option', { value: 'ssh' }, 'SSH'),
+                      h('option', { value: 'direct' }, 'Direct / Tailscale'),
+                      h('option', { value: 'local' }, 'Local (127.0.0.1)'),
+                    ),
+                  ),
+                  h(
+                    'label',
+                    { className: 'dk-field' },
+                    h('span', null, t('fieldPort')),
+                    h('input', {
+                      className: 'dk-input dk-mono',
+                      type: 'number',
+                      placeholder:
+                        form.kind === 'openclaw'
+                          ? '18789'
+                          : form.kind === 'dsh'
+                            ? '18790'
+                            : form.kind === 'acp'
+                              ? '18792'
+                              : '8642',
+                      value: form.port,
+                      onInput: (e: { target: { value: string } }) =>
+                        setForm((cur) => (cur ? { ...cur, port: e.target.value } : null)),
+                    }),
+                  ),
+                ),
+                form.transport === 'ssh'
+                  ? h(
+                      'label',
+                      { className: 'dk-field' },
+                      h('span', null, t('fieldSsh')),
+                      h('input', {
+                        className: 'dk-input dk-mono',
+                        placeholder: 'gpu-box',
+                        value: form.ssh,
+                        onInput: (e: { target: { value: string } }) =>
+                          setForm((cur) => (cur ? { ...cur, ssh: e.target.value } : null)),
+                      }),
+                    )
+                  : h(
+                      'label',
+                      { className: 'dk-field' },
+                      h('span', null, t('fieldHost')),
+                      h('input', {
+                        className: 'dk-input dk-mono',
+                        placeholder: '127.0.0.1',
+                        value: form.host,
+                        onInput: (e: { target: { value: string } }) =>
+                          setForm((cur) => (cur ? { ...cur, host: e.target.value } : null)),
+                      }),
+                    ),
+                form.kind === 'acp'
+                  ? h(
+                      'div',
+                      { className: 'dk-field-row' },
+                      h(
+                        'label',
+                        { className: 'dk-field' },
+                        h('span', null, t('fieldAcpTransport')),
+                        h(
+                          'select',
+                          {
+                            className: 'dk-input',
+                            value: form.acpTransport,
+                            onChange: (e: { target: { value: string } }) =>
+                              setForm((cur) =>
+                                cur ? { ...cur, acpTransport: e.target.value as 'websocket' | 'stdio' } : null,
+                              ),
+                          },
+                          h('option', { value: 'websocket' }, 'WebSocket'),
+                          h('option', { value: 'stdio' }, 'stdio'),
+                        ),
+                      ),
+                      form.acpTransport === 'stdio'
+                        ? h(
+                            'label',
+                            { className: 'dk-field' },
+                            h('span', null, t('fieldAcpCommand')),
+                            h('input', {
+                              className: 'dk-input dk-mono',
+                              placeholder: 'claude-code-acp',
+                              value: form.acpCommand,
+                              onInput: (e: { target: { value: string } }) =>
+                                setForm((cur) => (cur ? { ...cur, acpCommand: e.target.value } : null)),
+                            }),
+                          )
+                        : h('div', null),
+                    )
+                  : null,
+                h(
+                  'label',
+                  { className: 'dk-field' },
+                  h('span', null, t('fieldToken')),
+                  h('input', {
+                    className: 'dk-input dk-mono',
+                    type: 'password',
+                    placeholder: form.editing ? t('fieldTokenKeep') : '••••••••',
+                    value: form.token,
+                    onInput: (e: { target: { value: string } }) =>
+                      setForm((cur) => (cur ? { ...cur, token: e.target.value } : null)),
+                  }),
+                ),
+                h(
+                  'label',
+                  { className: 'dk-field' },
+                  h('span', null, t('fieldModel')),
+                  h('input', {
+                    className: 'dk-input dk-mono',
+                    placeholder: 'optional',
+                    value: form.model,
+                    onInput: (e: { target: { value: string } }) =>
+                      setForm((cur) => (cur ? { ...cur, model: e.target.value } : null)),
+                  }),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' } },
+                  h('button', { className: 'dk-btn', onClick: () => setForm(null) }, t('cancelBtn')),
+                  h(
+                    'button',
+                    { className: 'dk-btn dk-btn-primary', onClick: () => void saveAgentForm() },
+                    t('saveAgent'),
+                  ),
+                ),
+              ),
+            )
+          : null,
       ),
     );
   };

@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Config } from '../src/index.js';
 import { AgentManager } from '../src/manager.js';
@@ -45,6 +48,7 @@ let mcp: McpServer | undefined;
 afterEach(async () => {
   await mcp?.close();
   mcp = undefined;
+  delete process.env.DSH_KNOT_STATE_DIR;
 });
 
 describe('web UI host routes & schemastery Config', () => {
@@ -119,6 +123,22 @@ describe('web UI host routes & schemastery Config', () => {
     const cancelled = await post(WEB_ROUTES.cancel, { jobId: job.id });
     expect(cancelled.ok).toBe(true);
     expect(cancelled.value.status).toBe('cancelled');
+
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-store-'));
+    const saved = await post(WEB_ROUTES.agentSave, {
+      id: 'hermes-second',
+      kind: 'hermes',
+      transport: 'ssh',
+      ssh: 'gpu-2',
+      token: 'per-agent-secret-token',
+    });
+    expect(saved.ok).toBe(true);
+    expect(saved.value.agents.map((a: any) => [a.id, a.hasToken])).toContainEqual(['hermes-second', true]);
+    expect(JSON.stringify(saved)).not.toContain('per-agent-secret-token');
+
+    const deleted = await post(WEB_ROUTES.agentDelete, { id: 'hermes-second' });
+    expect(deleted.ok).toBe(true);
+    expect(deleted.value.agents.map((a: any) => a.id)).not.toContain('hermes-second');
     await manager.close();
   });
 });
