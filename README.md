@@ -1,30 +1,79 @@
-# dsh-knot
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="dsh-knot — Direct multi-agent bridge for DeepSeek Harness" width="100%" />
+</p>
 
-Connect **DeepSeek Harness (dsh)** with **Hermes**, **OpenClaw**, and remote **dsh** instances through the unified **Agent Client Protocol (ACP v1)** or their native gateway interfaces. No hosted relay, no cloud broker, and no Mesh plugin on remote hosts.
+<p align="center">
+  <a href="https://github.com/Weaxs/dsh-knot/actions/workflows/ci.yml">
+    <img src="https://github.com/Weaxs/dsh-knot/actions/workflows/ci.yml/badge.svg" alt="CI" />
+  </a>
+  <a href="https://github.com/Weaxs/dsh-knot/actions/workflows/e2e.yml">
+    <img src="https://github.com/Weaxs/dsh-knot/actions/workflows/e2e.yml/badge.svg" alt="24-Job E2E" />
+  </a>
+  <a href="https://www.npmjs.com/package/@weaxs/dsh-knot">
+    <img src="https://img.shields.io/npm/v/@weaxs/dsh-knot?color=4F7DF3&label=npm" alt="npm version" />
+  </a>
+  <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >= 22.13" />
+  <img src="https://img.shields.io/badge/protocol-ACP%20v1%20%2B%20MCP-6366F1" alt="ACP v1 + MCP" />
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+  </a>
+</p>
 
-- **dsh → remote agents:** start tasks, continue remote sessions, receive streamed output, answer approvals, and cancel runs.
-- **Remote agents → dsh:** expose explicitly allow-listed local dsh sessions through a read-only MCP endpoint.
-- **Three transports:** system OpenSSH by default, direct connections with a Tailscale preset, and local loopback.
-- **One ACP provider:** connect any ACP-compatible endpoint with `kind: acp`; an optional bridge reuses the native drivers behind one protocol.
+<p align="center">
+  Connect <strong>DeepSeek Harness (dsh)</strong> directly with <strong>any ACP v1 agent</strong>, <strong>Hermes</strong>, <strong>OpenClaw</strong>, and remote <strong>dsh</strong> instances over <strong>SSH</strong>, <strong>Tailscale</strong>, or <strong>local</strong> transports — with a built-in dsh Web UI and read-only MCP session sharing. <strong>No cloud relay, no broker, and no remote plugin required.</strong>
+</p>
 
-> Status: early development. ACP uses the official TypeScript SDK and stable v1 methods. Native compatibility remains available: Hermes uses the API Server (`/v1/runs` and SSE), OpenClaw uses the Gateway WebSocket pairing protocol, and remote dsh uses `/api/session/*` RPC. Always run `knot_doctor` after configuring a host.
+---
 
-## Packages
+## Highlights
 
-Both package names contain the same plugin:
+| Capability                   | What you get                                                                                                                                                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Universal ACP v1**         | Connect any ACP v1 WebSocket or NDJSON stdio agent (Claude Code, Codex, Gemini CLI, Pi, Goose, etc.) locally or over SSH.                                                                                                   |
+| **Native Drivers**           | First-class native adapters for **Hermes** (`/v1/runs` + SSE), **OpenClaw** (Gateway WebSocket v4 + Ed25519 pairing), and **remote dsh** (`/api/session/*` RPC), plus the optional `dsh-knot-acp` bridge.                   |
+| **Built-in dsh Web UI**      | Native horizontal Bento panel inside `dsh web` for one-click approvals, background job cancellation, `knot_doctor` diagnostics, remote session browsing, and live read-only MCP sharing toggles (bilingual `zh-CN` / `en`). |
+| **Zero-Config GUI Settings** | Exports a `@deepseek-ai/schemastery` Config schema so `dsh Settings → Plugins` renders a visual form automatically.                                                                                                         |
+| **Read-Only MCP Export**     | Expose explicitly allow-listed local dsh sessions to remote agents on a separate loopback/tailnet port with deny-by-default access, constant-time bearer auth, and recursive secret redaction.                              |
+| **Validated by Live E2E**    | 24-job real model-backed E2E matrix across Local, SSH, Tailscale, and Headscale.                                                                                                                                            |
 
-- `@weaxs/dsh-knot`
-- `dsh-knot`
+---
+
+## Web UI Dashboard
+
+When loaded in `dsh web`, **dsh-knot** registers a native sidebar entry (**DSH Knot / 远端互联**) that matches DeepSeek Harness's horizontal workspace canvas without duplicating the main chat window:
+
+<p align="center">
+  <img src="docs/assets/dashboard-preview.svg" alt="DSH Knot Web UI inside DeepSeek Harness" width="100%" />
+</p>
+
+- **Approve or cancel in one click**: Remote approval prompts and active background jobs appear at the top of the panel.
+- **Inspect connections**: Run `knot_doctor` across all configured agents or expand per-agent SSH and gateway checks.
+- **Browse remote history**: Search and page through remote sessions, then copy a ready-to-paste `agent_continue` prompt back into your main dsh chat.
+- **Control local sharing**: Toggle which local dsh sessions are visible over the separate read-only MCP listener.
+
+---
+
+## Architecture
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="dsh-knot Architecture" width="100%" />
+</p>
+
+See [docs/DESIGN.md](docs/DESIGN.md) for protocol contracts, event normalization, and security boundaries.
+
+---
 
 ## Install
 
-From npm, inside DeepSeek Harness:
+Both npm package names ship identical builds: **`@weaxs/dsh-knot`** and **`dsh-knot`**.
+
+### From npm inside DeepSeek Harness
 
 ```text
 Plugins → Add plugin → npm → @weaxs/dsh-knot
 ```
 
-Or install a local checkout for development:
+### From a local checkout
 
 ```bash
 git clone https://github.com/Weaxs/dsh-knot.git
@@ -33,74 +82,27 @@ npm ci
 npm run build
 ```
 
-Then add the absolute repository directory through **Plugins → Add plugin**. Restart dsh after replacing an installed package.
+Then add the absolute repository directory through **Plugins → Add plugin** and restart dsh.
 
-## Quick start
+---
 
-### 1. Configure Hermes
+## Quick Start
 
-Start the Hermes API Server on the remote host and keep it on loopback when using SSH. The adapter uses these endpoints:
+### 1. Connect any ACP v1 agent (stdio or WebSocket)
 
-- `GET /health` and `GET /api/sessions`
-- `POST /v1/runs`
-- `GET /v1/runs/{id}` and `GET /v1/runs/{id}/events`
-- `POST /v1/runs/{id}/approval` and `POST /v1/runs/{id}/stop`
-
-Set the API bearer key in the local environment where dsh runs:
-
-```bash
-export HERMES_API_KEY='your-hermes-api-key'
-```
-
-See [Hermes programmatic integration](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration) for the upstream API.
-
-### 2. Configure OpenClaw
-
-Keep OpenClaw Gateway on its trusted interface and configure its authentication token. Set the same token locally:
-
-```bash
-export OPENCLAW_GATEWAY_TOKEN='your-gateway-token'
-```
-
-The plugin creates one persistent Ed25519 device identity per configured agent under `$DSH_HOME/knot/devices`. Approve that device in OpenClaw on first use. The device key is never sent to the model or written to logs.
-
-### 3. Configure a remote dsh instance
-
-Start `dsh web` on the remote host and copy the launch token from its printed URL. Keep the native API on loopback for SSH, or configure a concrete bind IP and `--trusted-host` for a private network. Set the launch token locally:
-
-```bash
-export DSH_GATEWAY_TOKEN='the-token-from-the-remote-dsh-web-url'
-```
-
-The adapter exchanges that token through `/connect`, then uses `session/create`, `session/selectModel`, `session/prompt`, `session/wait`, and `session/cancel`. `model` and `dshProvider` are optional; omit them to use the remote instance's existing model selection.
-
-### 4. Optional: unify endpoints through ACP
-
-An ACP-compatible harness needs no bridge. Point one `acp` agent at its WebSocket endpoint, usually `/acp`, and set `DSH_KNOT_ACP_TOKEN` when the endpoint requires bearer authentication. For a standard stdio agent, use `acpTransport: stdio` and `acpCommand` instead:
+An ACP-compatible agent needs no bridge. Use `acpTransport: stdio` locally or over SSH:
 
 ```yaml
-- id: local-acp-agent
+- id: claude-box
   kind: acp
-  transport: local
+  transport: ssh
+  ssh: dev-vm
   acpTransport: stdio
-  acpCommand: /usr/local/bin/your-acp-agent
+  acpCommand: /usr/local/bin/claude-code-acp
   acpArgs: []
 ```
 
-The same `acpTransport: stdio` configuration works with `transport: ssh`; the plugin starts `acpCommand` through system OpenSSH and carries ACP NDJSON over its stdin/stdout.
-
-For Hermes, OpenClaw, or remote dsh without a native ACP endpoint, start the bridge on that host. It connects to the existing loopback gateway and exposes the same ACP v1 methods for every target:
-
-```bash
-export DSH_KNOT_NATIVE_KIND=hermes
-export DSH_KNOT_NATIVE_TOKEN='your-native-gateway-token'
-export DSH_KNOT_ACP_TOKEN='a-long-random-acp-token'
-dsh-knot-acp
-```
-
-The native port defaults to `8642`, `18789`, or `18790` according to `DSH_KNOT_NATIVE_KIND`. Override it with `DSH_KNOT_NATIVE_PORT`. The ACP listener defaults to `127.0.0.1:18792`; set `DSH_KNOT_ACP_HOST` and `DSH_KNOT_ACP_PORT` for a private-network listener. Non-loopback listeners require `DSH_KNOT_ACP_TOKEN`. DSH bridges read `DSH_GATEWAY_TOKEN` when `DSH_KNOT_NATIVE_TOKEN` is omitted. For an ACP stdio client such as an editor, run the bridge with `DSH_KNOT_ACP_STDIO=1`; protocol messages then use stdin/stdout instead of a listener.
-
-Use the same ACP configuration for a native ACP endpoint or a bridge:
+Or connect to an ACP WebSocket endpoint (default `/acp`, optional `DSH_KNOT_ACP_TOKEN`):
 
 ```yaml
 - id: unified-agent
@@ -110,11 +112,9 @@ Use the same ACP configuration for a native ACP endpoint or a bridge:
   port: 18792
 ```
 
-The ACP provider supports `initialize`, `session/new`, `session/list`, `session/prompt`, `session/cancel`, `session/update`, and `session/request_permission`. Continuations reuse the ACP session ID instead of creating a new session.
+### 2. Connect Hermes, OpenClaw, or Remote dsh
 
-### 5. Add the dsh configuration
-
-Add agents to the `knot` row in the profile's `cordis.patch.yml`:
+Configure agents in `Settings → Plugins → DSH Knot` (auto-generated via `schemastery`) or in your profile's `cordis.patch.yml`:
 
 ```yaml
 - id: knot
@@ -140,43 +140,64 @@ Add agents to the `knot` row in the profile's `cordis.patch.yml`:
         dshProvider: openai
 ```
 
-SSH is the default when `transport` is omitted. `gpu-box` is an alias from `~/.ssh/config`, not a command line. Read [the SSH guide](docs/SSH.md) before the first connection.
+Set only the gateway tokens you use in the local environment where dsh runs:
 
-### 6. Check the connection
+```bash
+export HERMES_API_KEY='your-hermes-api-key'
+export OPENCLAW_GATEWAY_TOKEN='your-openclaw-gateway-token'
+export DSH_GATEWAY_TOKEN='launch-token-from-remote-dsh-web-url'
+```
 
-Ask dsh:
+> **Note:** OpenClaw creates one persistent Ed25519 device identity per agent under `$DSH_HOME/knot/devices` (mode `0600`). Approve that device once in OpenClaw. For SSH host aliases and troubleshooting, see [docs/SSH.md](docs/SSH.md).
+
+### 3. Optional: Run the `dsh-knot-acp` bridge
+
+Expose a loopback Hermes, OpenClaw, or remote dsh gateway over standard ACP v1 (WebSocket or `DSH_KNOT_ACP_STDIO=1`):
+
+```bash
+export DSH_KNOT_NATIVE_KIND=hermes
+export DSH_KNOT_NATIVE_TOKEN='your-native-gateway-token'
+export DSH_KNOT_ACP_TOKEN='a-long-random-acp-token'
+dsh-knot-acp
+```
+
+The listener defaults to `127.0.0.1:18792` (`DSH_KNOT_ACP_HOST` / `DSH_KNOT_ACP_PORT`). Non-loopback listeners require `DSH_KNOT_ACP_TOKEN`.
+
+### 4. Verify with `knot_doctor`
+
+Ask dsh or click **Test all connections** in the Web UI:
 
 ```text
 Use knot_doctor to check every configured agent.
 ```
 
-The doctor checks SSH configuration, non-interactive login, gateway reachability, and protocol health. It does not modify `~/.ssh/config` or accept unknown host keys. If an SSH key is restricted to port forwarding without shell login, `ssh-login` reports that restriction while `gateway-health` is still checked.
+`knot_doctor` checks SSH config, non-interactive login, gateway reachability, and protocol health without modifying `~/.ssh/config` or accepting unknown host keys. On forwarding-only SSH keys without shell login, `ssh-login` reports the restriction while `gateway-health` is still verified.
 
-## Model tools
+---
+
+## Model Tools
 
 | Tool             | Purpose                                                                           |
 | ---------------- | --------------------------------------------------------------------------------- |
 | `agent_list`     | List configured agents and optionally probe their health.                         |
-| `agent_ask`      | Start a task and return a local `jobId`. Use `wait: true` for a synchronous call. |
-| `agent_continue` | Send another message to the same remote session.                                  |
+| `agent_ask`      | Start a remote task and return a `jobId` immediately (or `wait: true`).           |
+| `agent_continue` | Send a follow-up message to the same remote session.                              |
 | `agent_status`   | Read streamed output, state, errors, and pending approvals.                       |
-| `agent_cancel`   | Cancel a running remote task.                                                     |
-| `agent_respond`  | Answer an approval using one of its offered choices.                              |
-| `knot_doctor`    | Diagnose transport, SSH, gateway, and protocol failures.                          |
+| `agent_cancel`   | Abort the local stream and cancel the remote run while preserving partial output. |
+| `agent_respond`  | Answer a pending remote approval using one of its offered choices.                |
+| `knot_doctor`    | Diagnose transport, SSH, gateway reachability, and protocol health.               |
 
-Long tasks run in the background with bounded in-memory output and finished-job retention. Tool cancellations (`exec.signal`) are forwarded into network calls, waits, doctor checks, and remote cancellations; `agent_cancel` aborts both the local stream and the remote run without discarding partial output. When the originating dsh Agent supports `followup`, the plugin posts a completion notification back to that session.
+Long tasks run in the background with bounded in-memory output and finished-job eviction. Tool cancellations (`exec.signal`) are forwarded into network calls, waits, doctor checks, and remote cancellations. When the originating dsh Agent supports `followup`, completion updates are posted back automatically.
 
-## Share dsh sessions through MCP
+---
 
-The reverse endpoint is **read-only** in this release. It has its own listener and does not expose the dsh Web UI or its cookie-authenticated API.
+## Reverse Read-Only MCP Sharing
 
-Set a strong local token:
+Expose explicitly allow-listed local dsh sessions to remote agents over a **separate read-only HTTP listener** (never mounted on the dsh Web UI):
 
 ```bash
 export DSH_KNOT_TOKEN='a-long-random-token'
 ```
-
-Enable MCP and name every session that may be read. An empty list shares nothing:
 
 ```yaml
 - id: knot
@@ -188,21 +209,12 @@ Enable MCP and name every session that may be read. An empty list shares nothing
       port: 19400
       allowSessions:
         - your-exact-dsh-session-id
-    agents:
-      - id: hermes-gpu
-        kind: hermes
-        ssh: gpu-box
 ```
 
-MCP tools:
+- **Tools exposed**: `dsh_sessions_list`, `dsh_session_read`, `dsh_session_watch` (read-only).
+- **Security**: Deny-by-default (`allowSessions: []` shares nothing), refuses wildcard hosts (`0.0.0.0` / `::`), constant-time Bearer verification, 1 MB body cap (`413` on overflow), 50-item JSON-RPC batch cap, and recursive circular-safe secret redaction.
 
-- `dsh_sessions_list`
-- `dsh_session_read`
-- `dsh_session_watch`
-
-All returned content is recursively redacted (with circular-reference protection) for common API keys, bearer/basic credentials, JWTs, cookies, and private keys. Requests require `Authorization: Bearer $DSH_KNOT_TOKEN` (verified in constant time), request bodies are capped at 1 MB (`413` on overflow), JSON-RPC batches are capped at 50 items, and wildcard bind addresses (`0.0.0.0`, `::`) are rejected.
-
-For a remote Hermes MCP configuration using SSH forwarding, use:
+Remote client snippet (e.g., Hermes over SSH reverse forwarding `-R 19400:127.0.0.1:19400`):
 
 ```yaml
 mcp_servers:
@@ -213,17 +225,19 @@ mcp_servers:
     trust: untrusted
 ```
 
-The SSH reverse-forward setup and Tailscale alternative are described in [docs/DESIGN.md](docs/DESIGN.md).
+---
 
 ## Transports
 
-| Transport       | Best for                                              | Notes                                                                               |
-| --------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `ssh` (default) | Existing SSH hosts                                    | Uses `ssh -W` with `BatchMode=yes`; no password prompts or custom SSH cryptography. |
-| `direct`        | Tailscale, Headscale, LAN, or another trusted network | Uses the configured host and port; set `tls: true` for HTTPS/WSS.                   |
-| `local`         | Hermes, OpenClaw, or dsh on the same machine          | Defaults to `127.0.0.1`.                                                            |
+| Transport         | Best for                   | Notes                                                                                                   |
+| ----------------- | -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `ssh` _(default)_ | Existing SSH hosts         | Invokes system OpenSSH directly (`ssh -W` / stdio) with `BatchMode=yes` and `ExitOnForwardFailure=yes`. |
+| `direct`          | Tailscale, Headscale, LAN  | Uses configured `host` and `port`; set `tls: true` for HTTPS/WSS.                                       |
+| `local`           | Agents on the same machine | Defaults to `127.0.0.1`.                                                                                |
 
-## Development
+---
+
+## Development & Release
 
 ```bash
 npm ci
@@ -234,12 +248,13 @@ npm run build
 npm run check
 ```
 
-See [AGENTS.md](AGENTS.md) for repository rules and [docs/DESIGN.md](docs/DESIGN.md) for the protocol architecture. Transport integration tests for SSH, Tailscale, local, and Headscale are documented in [docs/E2E.md](docs/E2E.md).
+- Repository rules & lessons: [AGENTS.md](AGENTS.md)
+- Protocol architecture: [docs/DESIGN.md](docs/DESIGN.md)
+- SSH troubleshooting: [docs/SSH.md](docs/SSH.md)
+- 24-job live E2E matrix: [docs/E2E.md](docs/E2E.md)
 
-## Release
-
-Releases run only through GitHub Actions. Bump the version with `npm run release <semver>` (which syncs `package.json` and `src/version.ts`), add `NPM_TOKEN` to the repository secrets, and push a matching tag such as `v0.1.0`. The workflow verifies the tag against `package.json` and `src/version.ts`, runs all checks, publishes both package names with provenance, and creates a GitHub Release.
+Releases are tag-triggered via GitHub Actions: bump with `npm run release <semver>` (syncs `package.json` and `src/version.ts`), push tag `v<semver>`, and CI verifies, publishes both `@weaxs/dsh-knot` and `dsh-knot` with provenance, and creates the GitHub Release.
 
 ## License
 
-MIT
+[MIT](LICENSE)

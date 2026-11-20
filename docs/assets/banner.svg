@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="dsh-knot banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1020"/>
+      <stop offset="55%" stop-color="#11182E"/>
+      <stop offset="100%" stop-color="#171E38"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4F7DF3"/>
+      <stop offset="50%" stop-color="#7C9BFF"/>
+      <stop offset="100%" stop-color="#C45FA0"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#FFFFFF" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="320" rx="18" fill="url(#bg)"/>
+  <rect width="1200" height="320" rx="18" fill="url(#grid)"/>
+  <rect x="0.5" y="0.5" width="1199" height="319" rx="17.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.1"/>
+
+  <!-- Subtle Glow -->
+  <circle cx="950" cy="160" r="170" fill="#4F7DF3" fill-opacity="0.10"/>
+  <circle cx="1050" cy="110" r="110" fill="#C45FA0" fill-opacity="0.08"/>
+
+  <!-- Left Emblem + Wordmark -->
+  <g transform="translate(72, 74)">
+    <rect width="60" height="60" rx="14" fill="#1A2340" stroke="#FFFFFF" stroke-opacity="0.14"/>
+    <g transform="translate(12, 12)">
+      <path d="M11.5 13.2 24.6 7.8M11.8 22.8l12.5 5.4" fill="none" stroke="#7C9BFF" stroke-width="2.8" stroke-linecap="round"/>
+      <circle cx="9" cy="18" r="5" fill="#4F7DF3"/>
+      <circle cx="27" cy="7" r="4" fill="#C45FA0"/>
+      <circle cx="27" cy="29" r="4" fill="#7C9BFF"/>
+      <circle cx="9" cy="18" r="1.7" fill="#FFFFFF"/>
+    </g>
+
+    <text x="80" y="38" fill="#F8FAFC" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif" font-size="38" font-weight="700" letter-spacing="-0.8">dsh-knot</text>
+    <rect x="262" y="13" width="84" height="24" rx="12" fill="#4F7DF3" fill-opacity="0.18" stroke="#7C9BFF" stroke-opacity="0.45"/>
+    <text x="304" y="29" text-anchor="middle" fill="#A5BEFF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5" font-weight="600">ACP v1</text>
+
+    <text x="0" y="96" fill="#CBD5E1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif" font-size="17">
+      Direct multi-agent bridge for DeepSeek Harness — zero cloud relays.
+    </text>
+    <text x="0" y="124" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif" font-size="14.5">
+      Hermes · OpenClaw · Remote DSH · Any ACP v1 Agent · Read-Only MCP · Built-in Web UI
+    </text>
+
+    <!-- Bottom Feature Chips -->
+    <g transform="translate(0, 150)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11.5">
+      <rect x="0" y="0" width="112" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.06" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <text x="56" y="18" text-anchor="middle" fill="#E2E8F0">SSH Default</text>
+
+      <rect x="124" y="0" width="132" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.06" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <text x="190" y="18" text-anchor="middle" fill="#E2E8F0">Tailscale Ready</text>
+
+      <rect x="268" y="0" width="130" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.06" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <text x="333" y="18" text-anchor="middle" fill="#E2E8F0">Read-Only MCP</text>
+
+      <rect x="410" y="0" width="144" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.06" stroke="#FFFFFF" stroke-opacity="0.12"/>
+      <text x="482" y="18" text-anchor="middle" fill="#E2E8F0">24-Job Live E2E</text>
+    </g>
+  </g>
+
+  <!-- Right Minimal Topology Graphic -->
+  <g transform="translate(790, 62)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <!-- Local dsh node -->
+    <rect x="0" y="70" width="112" height="56" rx="12" fill="#182342" stroke="#7C9BFF" stroke-width="1.5"/>
+    <text x="56" y="95" text-anchor="middle" fill="#F8FAFC" font-size="13" font-weight="700">local dsh</text>
+    <text x="56" y="113" text-anchor="middle" fill="#94A3B8" font-size="10.5">dsh-knot</text>
+
+    <!-- Connector lines -->
+    <path d="M112 86 C158 86, 162 28, 212 28" fill="none" stroke="url(#accent)" stroke-width="2"/>
+    <path d="M112 96 C160 96, 164 80, 212 80" fill="none" stroke="#7C9BFF" stroke-width="1.8" stroke-opacity="0.85"/>
+    <path d="M112 104 C160 104, 164 132, 212 132" fill="none" stroke="#7C9BFF" stroke-width="1.8" stroke-opacity="0.85"/>
+    <path d="M112 112 C158 112, 162 182, 212 182" fill="none" stroke="#C45FA0" stroke-width="1.8" stroke-dasharray="4 4"/>
+
+    <!-- Remote targets -->
+    <rect x="212" y="8" width="136" height="38" rx="9" fill="#151D36" stroke="#FFFFFF" stroke-opacity="0.16"/>
+    <text x="280" y="31" text-anchor="middle" fill="#E2E8F0" font-size="12">ACP v1 Agents</text>
+
+    <rect x="212" y="60" width="136" height="38" rx="9" fill="#151D36" stroke="#FFFFFF" stroke-opacity="0.16"/>
+    <text x="280" y="83" text-anchor="middle" fill="#E2E8F0" font-size="12">Hermes API</text>
+
+    <rect x="212" y="112" width="136" height="38" rx="9" fill="#151D36" stroke="#FFFFFF" stroke-opacity="0.16"/>
+    <text x="280" y="135" text-anchor="middle" fill="#E2E8F0" font-size="12">OpenClaw WS</text>
+
+    <rect x="212" y="164" width="136" height="38" rx="9" fill="#151D36" stroke="#C45FA0" stroke-opacity="0.45"/>
+    <text x="280" y="187" text-anchor="middle" fill="#F1C2DF" font-size="12">Remote DSH</text>
+  </g>
+</svg>
