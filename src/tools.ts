@@ -100,7 +100,8 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
   ctx.tools.register(
     defineTool({
       name: 'agent_respond',
-      description: 'Answer a pending approval emitted by a remote agent job.',
+      description:
+        'Answer a pending approval emitted by a remote agent job. Always requires explicit user confirmation before forwarding.',
       parameters: {
         job: { type: 'string', required: true },
         choice: { type: 'string', required: true, description: 'The exact choice offered by the remote agent.' },
@@ -111,6 +112,25 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       },
     }),
   );
+
+  if (typeof (ctx as unknown as { on?: (...args: unknown[]) => unknown }).on === 'function') {
+    ctx.on('tools/pre-execute', async (exec, next) => {
+      if (exec.name !== 'agent_respond') return next();
+      const decision = await next();
+      if (decision.kind === 'deny' || decision.kind === 'cancel') return decision;
+      const args = exec.arguments as Record<string, unknown> | undefined;
+      const jobId = typeof args?.job === 'string' ? args.job : '';
+      const choice = typeof args?.choice === 'string' ? args.choice : '';
+      return {
+        kind: 'ask',
+        reason: `Remote agent approval requires explicit user confirmation (job ${jobId}, choice "${choice}").`,
+        displayReason: {
+          en: `Allow sending approval choice "${choice}" to remote job ${jobId}?`,
+          'zh-CN': `确认向远端任务 ${jobId} 提交审批选择「${choice}」吗？`,
+        },
+      };
+    });
+  }
 
   ctx.tools.register(
     defineTool({

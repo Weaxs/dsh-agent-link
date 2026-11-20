@@ -53,6 +53,13 @@ export const Config = Schema.object({
   }).description('Optional reverse read-only MCP export.'),
 });
 
+function getService<T>(ctx: Context, key: string): T | undefined {
+  if (typeof (ctx as unknown as { get?: (name: string) => unknown }).get === 'function') {
+    return (ctx as unknown as { get: (name: string) => unknown }).get(key) as T | undefined;
+  }
+  return (ctx as unknown as Record<string, unknown>)[key] as T | undefined;
+}
+
 export async function apply(ctx: Context, input: PluginConfig = {}): Promise<void> {
   const config = normalizeConfig(input);
   const stored = loadStoredState();
@@ -65,7 +72,7 @@ export async function apply(ctx: Context, input: PluginConfig = {}): Promise<voi
   }
   const manager = new AgentManager(merged, config.jobTimeoutMs);
   registerTools(ctx, manager);
-  const sessions = (ctx as unknown as { sessionController?: SessionControllerLike }).sessionController;
+  const sessions = getService<SessionControllerLike>(ctx, 'sessionController');
   let mcp: McpServer | undefined;
   if (config.mcp?.enabled) {
     if (!sessions) throw new Error('MCP sharing requires the dsh sessionController service');
@@ -74,7 +81,7 @@ export async function apply(ctx: Context, input: PluginConfig = {}): Promise<voi
     mcp = new McpServer(mcpConfig, sessions);
     await mcp.start();
   }
-  registerWebRoutes(ctx, manager, mcp, sessions);
+  registerWebRoutes(ctx, manager, mcp, () => getService<SessionControllerLike>(ctx, 'sessionController'));
   ctx.effect(() => async () => {
     await mcp?.close();
     await manager.close();

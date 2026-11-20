@@ -14,6 +14,7 @@ export class GatewayWebSocket {
   private ws?: WebSocket;
   private readonly pending = new Map<string, Pending>();
   private events = new AsyncQueue<Record<string, any>>();
+  private readonly subscribers = new Set<AsyncQueue<Record<string, any>>>();
   private connected = false;
 
   constructor(
@@ -117,11 +118,28 @@ export class GatewayWebSocket {
     return this.events.next(signal);
   }
 
+  subscribeEvents(): {
+    next: (signal?: AbortSignal) => Promise<IteratorResult<Record<string, any>>>;
+    unsubscribe: () => void;
+  } {
+    const queue = new AsyncQueue<Record<string, any>>();
+    this.subscribers.add(queue);
+    return {
+      next: (signal?: AbortSignal) => queue.next(signal),
+      unsubscribe: () => {
+        this.subscribers.delete(queue);
+        queue.finish();
+      },
+    };
+  }
+
   async close(): Promise<void> {
     this.connected = false;
     this.ws?.close();
     this.ws = undefined;
     this.events.finish();
+    for (const queue of this.subscribers) queue.finish();
+    this.subscribers.clear();
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.cleanup?.();
@@ -138,7 +156,11 @@ export class GatewayWebSocket {
       return;
     }
     if (frame.type === 'event') {
-      this.events.push(frame);
+      if (this.subscribers.size > 0) {
+        for (const queue of this.subscribers) queue.push(frame);
+      } else {
+        this.events.push(frame);
+      }
       return;
     }
     if (frame.type === 'res' && typeof frame.id === 'string') {
@@ -168,6 +190,8 @@ export class GatewayWebSocket {
   private fail(error: Error): void {
     this.connected = false;
     this.events.fail(error);
+    for (const queue of this.subscribers) queue.fail(error);
+    this.subscribers.clear();
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.cleanup?.();

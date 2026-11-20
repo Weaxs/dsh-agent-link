@@ -88,12 +88,13 @@ export class AgentManager {
   start(agentId: string, text: string, sessionId: string | undefined, onDone?: (job: AgentJob) => void): AgentJob {
     const adapter = this.adapter(agentId);
     const config = this.configs.find((item) => item.id === agentId)!;
-    const remoteSession = sessionId ?? (adapter.kind === 'acp' ? randomUUID() : createNativeSessionId(config));
+    const remoteSession =
+      sessionId ?? (adapter.kind === 'acp' || adapter.kind === 'dsh' ? undefined : createNativeSessionId(config));
     const id = randomUUID();
     const job: AgentJob = {
       id,
       agentId,
-      sessionId: remoteSession,
+      ...(remoteSession ? { sessionId: remoteSession } : {}),
       status: 'queued',
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -193,19 +194,20 @@ export class AgentManager {
     job: AgentJob,
     adapter: AgentAdapter,
     text: string,
-    sessionId: string,
+    sessionId: string | undefined,
     onDone?: (job: AgentJob) => void,
   ): Promise<AgentJob> {
     const controller = new AbortController();
     this.controllers.set(job.id, controller);
     const timer = setTimeout(() => {
       controller.abort(new Error(`job timed out after ${this.timeoutMs}ms`));
-      adapter.cancel(sessionId).catch(() => {});
+      if (job.sessionId) adapter.cancel(job.sessionId).catch(() => {});
     }, this.timeoutMs);
     job.status = 'running';
     job.updatedAt = Date.now();
     try {
       for await (const event of adapter.prompt(sessionId, text, controller.signal)) {
+        if (event.sessionId) job.sessionId = event.sessionId;
         if (event.type === 'text' && event.text) job.text = (job.text + event.text).slice(-2_000_000);
         else if (event.type === 'approval') {
           job.pendingApproval = { requestId: event.requestId ?? '', choices: event.choices ?? [], text: event.text };

@@ -103,4 +103,38 @@ describe('read-only MCP endpoint', () => {
     });
     expect(bigBatch.status).toBe(400);
   });
+
+  it('aborts in-flight watch requests immediately when session sharing is revoked', async () => {
+    const slowSessions: SessionControllerLike = {
+      ...sessions,
+      async *follow(_req, signal) {
+        yield { type: 'snapshot', cursor: 3, records: [] };
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 2_000);
+          signal.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        yield { type: 'event', event: { type: 'assistant/message', seq: 5, data: { text: 'secret after revoke' } } };
+      },
+    };
+    server = new McpServer({ port: 0, token: 'test-token', allowSessions: ['shared'] }, slowSessions);
+    const address = await server.start();
+    base = `http://${address.host}:${address.port}/mcp`;
+
+    const pendingWatch = rpc('tools/call', {
+      name: 'dsh_session_watch',
+      arguments: { sessionId: 'shared', since: 3, timeoutMs: 5_000 },
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    server.setAllowed('shared', false);
+    const result = await pendingWatch;
+    expect(result.error?.message).toMatch(/not shared/);
+    expect(JSON.stringify(result)).not.toContain('secret after revoke');
+  });
 });

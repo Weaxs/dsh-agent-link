@@ -1,5 +1,4 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { Readable, Writable } from 'node:stream';
 import {
   type ActiveSession,
@@ -34,6 +33,7 @@ export class AcpAdapter implements AgentAdapter {
   private readonly transport: Transport;
   private readonly queues = new Map<string, AsyncQueue<PromptMessage>>();
   private readonly activeSessions = new Map<string, ActiveSession>();
+  private readonly loadedSessions = new Set<string>();
   private readonly sessionIds = new Map<string, string>();
   private readonly permissions = new Map<string, PendingPermission>();
   private readonly pumping = new Set<string>();
@@ -74,60 +74,99 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
-    const alias = sessionId ?? randomUUID();
-    let actualId = alias;
+    let actualId = sessionId ?? '';
     let output = '';
     const queue = new AsyncQueue<PromptMessage>();
     try {
       await this.connect(signal);
-      let active = this.activeSessions.get(alias);
-      if (!active) {
-        active = await this.connection!.agent.buildSession({ cwd: this.config.dshCwd ?? '/', mcpServers: [] }).start({
-          cancellationSignal: signal,
-          stopWaitingOnCancel: true,
-        });
-        actualId = active.sessionId;
-        this.rememberSession(alias, actualId, active);
+      let active = sessionId ? this.activeSessions.get(sessionId) : undefined;
+      if (!active && sessionId) {
+        if (!this.loadedSessions.has(sessionId)) {
+          if (!this.capabilities?.loadSession) {
+            throw new Error(
+              `ACP agent "${this.id}" does not support session/load; cannot continue uncached session "${sessionId}"`,
+            );
+          }
+          await this.connection!.agent.request(
+            methods.agent.session.load,
+            { sessionId, cwd: this.config.dshCwd ?? '/', mcpServers: [] },
+            { cancellationSignal: signal, stopWaitingOnCancel: true },
+          );
+          this.rememberLoadedSession(sessionId);
+        }
+        actualId = sessionId;
+        this.queues.set(actualId, queue);
+        this.connection!.agent.request(
+          methods.agent.session.prompt,
+          { sessionId: actualId, prompt: [{ type: 'text', text }] },
+          { cancellationSignal: signal, stopWaitingOnCancel: true },
+        ).then(
+          (response) => {
+            queue.push({
+              kind: 'native',
+              value: { type: 'final', text: output, stopReason: response.stopReason, sessionId: actualId },
+            });
+          },
+          (error) => {
+            queue.push({
+              kind: 'native',
+              value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+            });
+          },
+        );
       } else {
-        actualId = active.sessionId;
-      }
-      this.queues.set(actualId, queue);
-      const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
-      completion.catch((error) => {
-        this.queues.get(actualId)?.push({
-          kind: 'native',
-          value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+        if (!active) {
+          active = await this.connection!.agent.buildSession({ cwd: this.config.dshCwd ?? '/', mcpServers: [] }).start({
+            cancellationSignal: signal,
+            stopWaitingOnCancel: true,
+          });
+          actualId = active.sessionId;
+          this.rememberSession(actualId, actualId, active);
+        } else {
+          actualId = active.sessionId;
+        }
+        this.queues.set(actualId, queue);
+        const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
+        completion.catch((error) => {
+          this.queues.get(actualId)?.push({
+            kind: 'native',
+            value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
+          });
         });
-      });
-      this.pumpUpdates(actualId, active);
+        this.pumpUpdates(actualId, active);
+      }
       while (true) {
         const next = await queue.next(signal);
         if (next.done) throw new Error('ACP event stream ended before the prompt completed');
         if (next.value.kind === 'acp') {
           if (next.value.value.kind === 'stop') {
-            yield { type: 'final', text: output, stopReason: next.value.value.stopReason };
+            yield { type: 'final', text: output, stopReason: next.value.value.stopReason, sessionId: actualId };
             return;
           }
           const event = acpEvent(next.value.value.update);
           if (!event) continue;
           if (event.type === 'text' && event.text) output += event.text;
-          yield event;
+          yield { ...event, sessionId: actualId };
         } else {
           const event = next.value.value;
           if (event.type === 'error') throw new Error(event.text ?? 'ACP agent failed');
+          if (event.type === 'final') {
+            yield { ...event, text: output || event.text || '', sessionId: actualId };
+            return;
+          }
           if (event.type === 'text' && event.text) output += event.text;
-          yield event;
+          yield { ...event, sessionId: actualId };
         }
       }
     } catch (error) {
       if (signal?.aborted) {
-        await this.cancel(actualId).catch(() => {});
-        yield { type: 'final', text: output, stopReason: 'cancelled' };
+        if (actualId) await this.cancel(actualId).catch(() => {});
+        yield { type: 'final', text: output, stopReason: 'cancelled', ...(actualId ? { sessionId: actualId } : {}) };
       } else {
         yield { type: 'error', text: error instanceof Error ? error.message : String(error) };
       }
     } finally {
-      this.queues.delete(actualId);
+      if (actualId) this.queues.delete(actualId);
       queue.finish();
     }
   }
@@ -169,8 +208,22 @@ export class AcpAdapter implements AgentAdapter {
   private clearSessions(): void {
     for (const session of new Set(this.activeSessions.values())) session.dispose();
     this.activeSessions.clear();
+    this.loadedSessions.clear();
     this.sessionIds.clear();
     this.pumping.clear();
+  }
+
+  private rememberLoadedSession(sessionId: string): void {
+    this.loadedSessions.delete(sessionId);
+    this.loadedSessions.add(sessionId);
+    this.sessionIds.delete(sessionId);
+    this.sessionIds.set(sessionId, sessionId);
+    while (this.loadedSessions.size > 500) {
+      const oldest = this.loadedSessions.values().next().value;
+      if (oldest === undefined) break;
+      this.loadedSessions.delete(oldest);
+      this.sessionIds.delete(oldest);
+    }
   }
 
   private rememberSession(alias: string, actualId: string, active: ActiveSession): void {
@@ -236,6 +289,11 @@ export class AcpAdapter implements AgentAdapter {
     await this.closeProcess();
     const stream = this.config.acpTransport === 'stdio' ? this.openStdio() : this.openWebSocket();
     const app = client({ name: 'dsh-knot' });
+    app.onNotification(methods.client.session.update, ({ params }) => {
+      if (!this.loadedSessions.has(params.sessionId) || this.activeSessions.has(params.sessionId)) return;
+      const event = acpEvent(params.update);
+      if (event) this.queues.get(params.sessionId)?.push({ kind: 'native', value: event });
+    });
     app.onRequest(methods.client.session.requestPermission, ({ params }) => {
       const requestId = params.toolCall.toolCallId;
       this.queues.get(params.sessionId)?.push({

@@ -41,17 +41,32 @@ export class DshAdapter implements AgentAdapter {
     let output = '';
     try {
       if (!this.sessionIds.has(requestedId)) {
-        const created = await this.rpc(
-          'create',
-          {
-            sessionId: requestedId,
-            ...(this.config.dshCwd ? { cwd: this.config.dshCwd } : {}),
-          },
-          signal,
-        );
-        actualId = String(created.sessionId ?? requestedId);
-        rememberBounded(this.sessionIds, requestedId, actualId);
-        rememberBounded(this.sessionIds, actualId, actualId);
+        let existingRemote = false;
+        if (sessionId) {
+          const remoteSessions = await this.listSessions(signal);
+          existingRemote = remoteSessions.some((item) => item.id === sessionId);
+        }
+        if (existingRemote) {
+          actualId = sessionId!;
+          rememberBounded(this.sessionIds, requestedId, actualId);
+        } else {
+          const created = await this.rpc(
+            'create',
+            {
+              sessionId: requestedId,
+              ...(this.config.dshCwd ? { cwd: this.config.dshCwd } : {}),
+            },
+            signal,
+          );
+          actualId = String(created.sessionId ?? requestedId);
+          if (sessionId && actualId !== sessionId) {
+            throw new Error(
+              `Remote DSH created a different session "${actualId}" instead of continuing "${sessionId}"`,
+            );
+          }
+          rememberBounded(this.sessionIds, requestedId, actualId);
+          rememberBounded(this.sessionIds, actualId, actualId);
+        }
       }
       if (this.config.model) {
         await this.rpc(
@@ -115,14 +130,14 @@ export class DshAdapter implements AgentAdapter {
         }
         rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));
         if (waited.reason !== 'timeout') {
-          yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle') };
+          yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle'), sessionId: actualId };
           return;
         }
       }
     } catch (error) {
       if (signal?.aborted) {
         await this.cancel(actualId).catch(() => {});
-        yield { type: 'final', text: output, stopReason: 'cancelled' };
+        yield { type: 'final', text: output, stopReason: 'cancelled', sessionId: actualId };
         return;
       }
       yield { type: 'error', text: error instanceof Error ? error.message : String(error) };

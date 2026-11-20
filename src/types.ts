@@ -51,6 +51,7 @@ export interface AgentEvent {
   requestId?: string;
   choices?: string[];
   stopReason?: string;
+  sessionId?: string;
 }
 
 export interface AgentSession {

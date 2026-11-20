@@ -45,44 +45,51 @@ export class OpenClawAdapter implements AgentAdapter {
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     await abortable(this.connect(), signal);
-    if (sessionId) {
-      await this.gateway.request(
-        'sessions.create',
+    const subscription =
+      typeof this.gateway.subscribeEvents === 'function'
+        ? this.gateway.subscribeEvents()
+        : {
+            next: (sig?: AbortSignal) => this.gateway.nextEvent(sig),
+            unsubscribe: () => {},
+          };
+    const waitAbort = new AbortController();
+    const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+    let output = '';
+    try {
+      if (sessionId) {
+        await this.gateway.request(
+          'sessions.create',
+          {
+            key: sessionId,
+            ...(this.config.openclawAgentId ? { agentId: this.config.openclawAgentId } : {}),
+            idempotencyKey: randomUUID(),
+          },
+          remaining(60_000, signal),
+        );
+      }
+      const started = await this.gateway.request(
+        'agent',
         {
-          key: sessionId,
+          message: text,
+          ...(sessionId ? { sessionKey: sessionId } : {}),
           ...(this.config.openclawAgentId ? { agentId: this.config.openclawAgentId } : {}),
           idempotencyKey: randomUUID(),
         },
         remaining(60_000, signal),
       );
-    }
-    const started = await this.gateway.request(
-      'agent',
-      {
-        message: text,
-        ...(sessionId ? { sessionKey: sessionId } : {}),
-        ...(this.config.openclawAgentId ? { agentId: this.config.openclawAgentId } : {}),
-        idempotencyKey: randomUUID(),
-      },
-      remaining(60_000, signal),
-    );
-    const runId = String(started.runId ?? started.run_id ?? started.id ?? '');
-    const sessionKey = String(started.sessionKey ?? started.session_key ?? sessionId ?? '');
-    if (!runId) throw new Error(`OpenClaw did not return a run id: ${JSON.stringify(started)}`);
-    const waitAbort = new AbortController();
-    const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener('abort', onAbort, { once: true });
-    const aborted = new Promise<{ kind: 'aborted' }>((resolve) => {
-      if (waitAbort.signal.aborted) resolve({ kind: 'aborted' });
-      else waitAbort.signal.addEventListener('abort', () => resolve({ kind: 'aborted' }), { once: true });
-    });
-    let completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);
-    completed.catch(() => {});
-    let next = this.gateway.nextEvent(waitAbort.signal);
-    next.catch(() => {});
-    let output = '';
-    try {
+      const runId = String(started.runId ?? started.run_id ?? started.id ?? '');
+      const sessionKey = String(started.sessionKey ?? started.session_key ?? sessionId ?? '');
+      if (!runId) throw new Error(`OpenClaw did not return a run id: ${JSON.stringify(started)}`);
+      const aborted = new Promise<{ kind: 'aborted' }>((resolve) => {
+        if (waitAbort.signal.aborted) resolve({ kind: 'aborted' });
+        else waitAbort.signal.addEventListener('abort', () => resolve({ kind: 'aborted' }), { once: true });
+      });
+      let completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);
+      completed.catch(() => {});
+      let next = subscription.next(waitAbort.signal);
+      next.catch(() => {});
       while (true) {
         if (signal?.aborted) {
           await this.cancel(sessionKey).catch(() => {});
@@ -98,7 +105,8 @@ export class OpenClawAdapter implements AgentAdapter {
           return;
         }
         if (result.kind === 'done') {
-          if (result.value.status === 'pending' || result.value.status === 'timeout') {
+          const rawStatus = String(result.value.status ?? 'completed').toLowerCase();
+          if (rawStatus === 'pending' || rawStatus === 'timeout') {
             completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);
             completed.catch(() => {});
             continue;
@@ -111,10 +119,20 @@ export class OpenClawAdapter implements AgentAdapter {
               result.value.terminalReceipt ??
               result.value,
           );
-          yield { type: 'final', text: textResult || output, stopReason: String(result.value.status ?? 'completed') };
+          if (rawStatus === 'error' || rawStatus === 'failed' || result.value.error !== undefined) {
+            const errText =
+              textOf(result.value.error) ||
+              (typeof result.value.error === 'string' ? result.value.error : '') ||
+              textResult ||
+              `OpenClaw run ended with status "${rawStatus}"`;
+            yield { type: 'error', text: errText, stopReason: rawStatus };
+            return;
+          }
+          const stopReason = rawStatus === 'aborted' || rawStatus === 'cancelled' ? 'cancelled' : rawStatus;
+          yield { type: 'final', text: textResult || output, stopReason };
           return;
         }
-        next = this.gateway.nextEvent(waitAbort.signal);
+        next = subscription.next(waitAbort.signal);
         next.catch(() => {});
         if (result.value.done) throw new Error('OpenClaw event stream ended before the run completed');
         const frame = result.value.value;
@@ -146,6 +164,7 @@ export class OpenClawAdapter implements AgentAdapter {
     } finally {
       signal?.removeEventListener('abort', onAbort);
       waitAbort.abort();
+      subscription.unsubscribe();
     }
   }
 

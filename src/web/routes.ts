@@ -52,28 +52,38 @@ export function registerWebRoutes(
   ctx: Context,
   manager: AgentManager,
   mcp: McpServer | undefined,
-  sessions: SessionControllerLike | undefined,
+  sessions: SessionControllerLike | (() => SessionControllerLike | undefined) | undefined,
 ): void {
-  const register = (path: string, handler: (request: Request) => Promise<Response>) => {
-    const conn = (ctx as unknown as { connection?: ConnectionHostFace }).connection;
-    if (typeof conn?.fetch?.register !== 'function') return;
-    const dispose = conn.fetch.register({
-      path,
-      methods: ['POST'],
-      requestBody: 'buffered',
-      fetch: handler,
-    });
-    ctx.effect(() => dispose);
-  };
+  const resolveSessions = (): SessionControllerLike | undefined =>
+    typeof sessions === 'function' ? sessions() : sessions;
 
-  const mountAll = () => {
+  const mountAll = (targetCtx: Context) => {
+    const conn =
+      typeof (targetCtx as unknown as { get?: (name: string) => unknown }).get === 'function'
+        ? ((targetCtx as unknown as { get: (name: string) => unknown }).get('connection') as
+            | ConnectionHostFace
+            | undefined)
+        : (targetCtx as unknown as { connection?: ConnectionHostFace }).connection;
+    if (typeof conn?.fetch?.register !== 'function') return;
+
+    const register = (path: string, handler: (request: Request) => Promise<Response>) => {
+      const dispose = conn.fetch!.register!({
+        path,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: handler,
+      });
+      targetCtx.effect(() => dispose);
+    };
+
     register(WEB_ROUTES.state, async (request) => {
       try {
         const localSessions: Array<{ sessionId: string; title?: string; cwd?: string; shared: boolean }> = [];
         const allowed = new Set(mcp?.listAllowed() ?? []);
-        if (sessions) {
+        const currentSessions = resolveSessions();
+        if (currentSessions) {
           try {
-            const listed = await sessions.list({}, request.signal);
+            const listed = await currentSessions.list({}, request.signal);
             for (const item of listed.items.slice(0, 100)) {
               const id = String(item.sessionId ?? '');
               if (!id) continue;
@@ -255,9 +265,15 @@ export function registerWebRoutes(
     });
   };
 
-  if (typeof (ctx as unknown as { inject?: (deps: string[], cb: () => void) => void }).inject === 'function') {
-    (ctx as unknown as { inject: (deps: string[], cb: () => void) => void }).inject(['connection'], mountAll);
+  if (
+    typeof (ctx as unknown as { inject?: (deps: string[], cb: (subCtx: Context) => void) => void }).inject ===
+    'function'
+  ) {
+    (ctx as unknown as { inject: (deps: string[], cb: (subCtx: Context) => void) => void }).inject(
+      ['connection'],
+      (connCtx) => mountAll(connCtx),
+    );
   } else {
-    mountAll();
+    mountAll(ctx);
   }
 }

@@ -73,6 +73,82 @@ describe('OpenClaw adapter', () => {
     await adapter.cancel('agent:main:test');
     expect(gateway.calls.at(-1)?.method).toBe('sessions.abort');
   });
+
+  it('fans out concurrent run events without stealing and reports terminal error status as error', async () => {
+    process.env.OPENCLAW_GATEWAY_TOKEN = 'token';
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-'));
+    const { AsyncQueue } = await import('../src/async-queue.js');
+    const subscribers = new Set<InstanceType<typeof AsyncQueue<Record<string, any>>>>();
+    let runSeq = 0;
+    const waitResolvers = new Map<string, (val: Record<string, any>) => void>();
+    const gateway = {
+      isOpen: true,
+      async openWebSocket() {
+        this.isOpen = true;
+      },
+      async nextEvent() {
+        return {
+          done: false,
+          value: { type: 'event', event: 'connect.challenge', payload: { nonce: 'n', ts: 1737264000000 } },
+        };
+      },
+      subscribeEvents() {
+        const q = new AsyncQueue<Record<string, any>>();
+        subscribers.add(q);
+        return {
+          next: (sig?: AbortSignal) => q.next(sig),
+          unsubscribe: () => {
+            subscribers.delete(q);
+            q.finish();
+          },
+        };
+      },
+      async request(method: string, params: any) {
+        if (method === 'connect') return { type: 'hello-ok' };
+        if (method === 'sessions.create') return { sessionKey: params.key };
+        if (method === 'agent') {
+          const runId = `run-${++runSeq}`;
+          return { runId, sessionKey: params.sessionKey };
+        }
+        if (method === 'agent.wait') {
+          return new Promise<Record<string, any>>((resolve) => {
+            waitResolvers.set(params.runId, resolve);
+          });
+        }
+        return {};
+      },
+      async close() {
+        this.isOpen = false;
+      },
+    };
+    const emit = (frame: Record<string, any>) => {
+      for (const q of subscribers) q.push(frame);
+    };
+    const adapter = new OpenClawAdapter(
+      'claw',
+      { id: 'claw', kind: 'openclaw', transport: 'local' },
+      undefined,
+      gateway as any,
+    );
+    const collect = async (session: string, msg: string) => {
+      const out = [];
+      for await (const ev of adapter.prompt(session, msg)) out.push(ev);
+      return out;
+    };
+    const p1 = collect('s1', 'task 1');
+    const p2 = collect('s2', 'task 2');
+    await new Promise((r) => setTimeout(r, 10));
+    emit({ type: 'event', event: 'agent', payload: { runId: 'run-2', type: 'message.delta', delta: 'from-2' } });
+    emit({ type: 'event', event: 'agent', payload: { runId: 'run-1', type: 'message.delta', delta: 'from-1' } });
+    await new Promise((r) => setTimeout(r, 10));
+    waitResolvers.get('run-1')!({ status: 'ok', terminalReply: { text: 'from-1' } });
+    waitResolvers.get('run-2')!({ status: 'error', error: 'model crashed' });
+    const [e1, e2] = await Promise.all([p1, p2]);
+    expect(e1.some((e) => e.type === 'text' && e.text === 'from-1')).toBe(true);
+    expect(e1.at(-1)).toMatchObject({ type: 'final', text: 'from-1' });
+    expect(e2.some((e) => e.type === 'text' && e.text === 'from-2')).toBe(true);
+    expect(e2.at(-1)).toMatchObject({ type: 'error', text: 'model crashed', stopReason: 'error' });
+  });
 });
 
 describe('device identity', () => {

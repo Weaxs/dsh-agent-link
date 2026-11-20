@@ -16,6 +16,7 @@ export class McpServer {
   private serverAbort?: AbortController;
   private boundAddress?: { host: string; port: number };
   private readonly allowed: Set<string>;
+  private readonly activeWatches = new Map<string, Set<AbortController>>();
   private readonly token?: string;
 
   constructor(
@@ -62,8 +63,15 @@ export class McpServer {
 
   setAllowed(sessionId: string, allow: boolean): void {
     if (!sessionId) return;
-    if (allow) this.allowed.add(sessionId);
-    else this.allowed.delete(sessionId);
+    if (allow) {
+      this.allowed.add(sessionId);
+    } else {
+      this.allowed.delete(sessionId);
+      const controllers = this.activeWatches.get(sessionId);
+      if (controllers) {
+        for (const controller of controllers) controller.abort(new Error('Session sharing was revoked'));
+      }
+    }
   }
 
   async close(): Promise<void> {
@@ -183,6 +191,7 @@ export class McpServer {
         },
         signal,
       );
+      this.assertAllowed(sessionId);
       return redact(value);
     }
     if (name === 'dsh_session_watch') {
@@ -199,6 +208,12 @@ export class McpServer {
     signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
+    let set = this.activeWatches.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.activeWatches.set(sessionId, set);
+    }
+    set.add(controller);
     let timedOut = false;
     const onParentAbort = () => controller.abort(signal.reason ?? new Error('aborted'));
     if (signal.aborted) onParentAbort();
@@ -215,6 +230,7 @@ export class McpServer {
         { address: { kind: 'session', sessionId }, activate: false, maxMessages: 100 },
         controller.signal,
       )) {
+        this.assertAllowed(sessionId);
         if (frame.type === 'assistant-stream') continue;
         if (frame.type === 'snapshot' && typeof frame.cursor === 'number') cursor = Math.max(cursor, frame.cursor);
         const event = frame.event as { seq?: number } | undefined;
@@ -238,11 +254,15 @@ export class McpServer {
         if (frame.type === 'event' && timeoutMs > 0) break;
       }
     } catch (error) {
+      if (!this.allowed.has(sessionId)) this.assertAllowed(sessionId);
       if (!controller.signal.aborted) throw error;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', onParentAbort);
+      set.delete(controller);
+      if (set.size === 0) this.activeWatches.delete(sessionId);
     }
+    this.assertAllowed(sessionId);
     return { sessionId, cursor, frames, timedOut };
   }
 

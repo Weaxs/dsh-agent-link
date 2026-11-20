@@ -127,12 +127,32 @@ describe('DSH adapter', () => {
 
     expect(await adapter.health()).toEqual({ ok: true, sessions: 1 });
     expect(await adapter.listSessions()).toEqual([{ id: 'dsh-session-1', title: 'Remote', updatedAt: undefined }]);
-    const events = [];
-    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) events.push(event);
-    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
+
+    // New session calls session/create once and reuses it on continuation
+    const created = [];
+    for await (const event of adapter.prompt(undefined, 'remember AL-TEST')) created.push(event);
+    const createdId = created.at(-1)?.sessionId;
+    expect(createdId).toBeTruthy();
+    expect(created.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
     const continued = [];
-    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) continued.push(event);
-    expect(continued.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', stopReason: 'idle' });
+    for await (const event of adapter.prompt(createdId, 'remember AL-TEST')) continued.push(event);
+    expect(continued.at(-1)).toMatchObject({
+      type: 'final',
+      text: 'AL-TEST',
+      stopReason: 'idle',
+      sessionId: createdId,
+    });
+    expect(transport.calls.filter((call) => (call.body as any)?.method === 'session/create')).toHaveLength(1);
+
+    // Continuing an uncached historical session already listed on remote DSH skips session/create
+    const historical = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) historical.push(event);
+    expect(historical.at(-1)).toMatchObject({
+      type: 'final',
+      text: 'AL-TEST',
+      stopReason: 'idle',
+      sessionId: 'dsh-session-1',
+    });
     expect(transport.calls.filter((call) => (call.body as any)?.method === 'session/create')).toHaveLength(1);
     expect(transport.calls.some((call) => (call.body as any)?.method === 'session/selectModel')).toBe(true);
     expect(transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body).toMatchObject({

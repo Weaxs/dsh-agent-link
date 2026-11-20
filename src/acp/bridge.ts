@@ -122,7 +122,7 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
       protocolVersion: PROTOCOL_VERSION,
       agentInfo: { name: 'dsh-knot-acp-bridge', version: VERSION },
       agentCapabilities: {
-        loadSession: false,
+        loadSession: true,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },
         sessionCapabilities: { list: {} },
       },
@@ -139,6 +139,17 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
     }
     cancelled.delete(sessionId);
     return { sessionId };
+  });
+  app.onRequest(methods.agent.session.load, ({ params }) => {
+    sessionCwds.delete(params.sessionId);
+    sessionCwds.set(params.sessionId, params.cwd);
+    while (sessionCwds.size > 500) {
+      const oldest = sessionCwds.keys().next().value;
+      if (oldest === undefined) break;
+      sessionCwds.delete(oldest);
+    }
+    cancelled.delete(params.sessionId);
+    return {};
   });
   app.onRequest(methods.agent.session.list, async ({ signal }) => {
     const sessions = await adapter.listSessions(signal);

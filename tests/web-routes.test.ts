@@ -1,7 +1,9 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Context } from '@deepseek-ai/cordis';
 import { afterEach, describe, expect, it } from 'vitest';
+import * as plugin from '../src/index.js';
 import { apply, Config } from '../src/index.js';
 import { AgentManager } from '../src/manager.js';
 import { McpServer } from '../src/mcp/server.js';
@@ -196,5 +198,49 @@ describe('web UI host routes & schemastery Config', () => {
     expect(() => loadStoredState()).toThrow();
 
     await manager.close();
+  });
+
+  it('activates cleanly in real Cordis 4.1.0 without sessionController, mounts all 8 routes on connection, and gates agent_respond with ask', async () => {
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-cordis-'));
+    const root = new Context();
+    const registeredTools: string[] = [];
+    const registeredRoutes: string[] = [];
+    (root as any).provide('tools');
+    (root as any).set('tools', { register: (tool: { name: string }) => registeredTools.push(tool.name) });
+
+    // Default config without sessionController must activate without throwing
+    const fiber = root.plugin(plugin as any, {});
+    await fiber;
+    expect(registeredTools).toHaveLength(7);
+
+    // Providing connection later mounts all 8 Dashboard routes on the injected child context
+    (root as any).provide('connection');
+    (root as any).set('connection', {
+      fetch: {
+        register(route: { path: string }) {
+          registeredRoutes.push(route.path);
+          return () => {};
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(registeredRoutes.sort()).toEqual(Object.values(WEB_ROUTES).sort());
+
+    // tools/pre-execute forces user confirmation ('ask') for agent_respond
+    const decision = await (root as any).waterfall(
+      'tools/pre-execute',
+      { name: 'agent_respond', arguments: { job: 'job-1', choice: 'approve' } },
+      async () => ({ kind: 'allow' }),
+    );
+    expect(decision).toMatchObject({ kind: 'ask' });
+
+    const passthrough = await (root as any).waterfall(
+      'tools/pre-execute',
+      { name: 'agent_list', arguments: {} },
+      async () => ({ kind: 'allow' }),
+    );
+    expect(passthrough).toEqual({ kind: 'allow' });
+
+    await fiber.dispose();
   });
 });

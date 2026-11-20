@@ -69,26 +69,47 @@ describe('ACP provider and bridge', () => {
 
     expect(await adapter.health()).toMatchObject({ ok: true, protocol: 'acp', protocolVersion: 1 });
     const first = [];
-    for await (const event of adapter.prompt('alias-1', 'first prompt')) {
+    for await (const event of adapter.prompt(undefined, 'first prompt')) {
       first.push(event);
-      if (event.type === 'approval') await adapter.respond('alias-1', event.requestId!, 'approve');
+      if (event.type === 'approval') await adapter.respond(event.sessionId!, event.requestId!, 'approve');
     }
+    const createdSessionId = first.at(-1)?.sessionId;
+    expect(createdSessionId).toBeTruthy();
     expect(first.at(-1)).toMatchObject({ type: 'final', text: 'hello world', stopReason: 'end_turn' });
     expect(first.filter((event) => event.type === 'tool')).toHaveLength(2);
     expect(native.choice).toBe('approve');
 
     native.choice = undefined;
     const second = [];
-    for await (const event of adapter.prompt('alias-1', 'continuation')) {
+    for await (const event of adapter.prompt(createdSessionId, 'continuation')) {
       second.push(event);
-      if (event.type === 'approval') await adapter.respond('alias-1', event.requestId!, 'approve');
+      if (event.type === 'approval') await adapter.respond(createdSessionId!, event.requestId!, 'approve');
     }
-    expect(second.at(-1)).toMatchObject({ type: 'final', text: 'hello world' });
+    expect(second.at(-1)).toMatchObject({ type: 'final', text: 'hello world', sessionId: createdSessionId });
     expect(native.prompts.map((prompt) => prompt.text)).toEqual(['first prompt', 'continuation']);
     expect(new Set(native.prompts.map((prompt) => prompt.sessionId)).size).toBe(1);
     expect(await adapter.listSessions()).toEqual([
       { id: native.prompts[0]!.sessionId, title: 'ACP session', updatedAt: '2026-01-01T00:00:00.000Z' },
     ]);
+
+    // A fresh adapter (empty cache) resumes the historical session via session/load without changing sessionId
+    const freshAdapter = new AcpAdapter('unified-fresh', {
+      id: 'unified-fresh',
+      kind: 'acp',
+      transport: 'local',
+      host: address.host,
+      port: address.port,
+      token: 'acp-test-token',
+    });
+    cleanups.push(() => freshAdapter.close());
+    native.choice = undefined;
+    const resumed = [];
+    for await (const event of freshAdapter.prompt(createdSessionId, 'resumed after restart')) {
+      resumed.push(event);
+      if (event.type === 'approval') await freshAdapter.respond(createdSessionId!, event.requestId!, 'approve');
+    }
+    expect(resumed.at(-1)).toMatchObject({ type: 'final', text: 'hello world', sessionId: createdSessionId });
+    expect(native.prompts.at(-1)?.sessionId).toBe(createdSessionId);
   });
 
   it('propagates cancellation through ACP session/cancel', async () => {
@@ -137,8 +158,19 @@ describe('ACP provider and bridge', () => {
     cleanups.push(() => adapter.close());
     expect(await adapter.health()).toMatchObject({ ok: true, protocol: 'acp', protocolVersion: 1 });
     const events = [];
-    for await (const event of adapter.prompt('stdio-alias', 'hello')) events.push(event);
-    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'stdio:hello', stopReason: 'end_turn' });
+    for await (const event of adapter.prompt(undefined, 'hello')) events.push(event);
+    expect(events.at(-1)).toMatchObject({
+      type: 'final',
+      text: 'stdio:hello',
+      stopReason: 'end_turn',
+      sessionId: 'stdio-session',
+    });
+
+    // Uncached historical session fails honestly when server does not advertise loadSession
+    const failed = [];
+    for await (const event of adapter.prompt('unknown-historical-id', 'hello again')) failed.push(event);
+    expect(failed.at(-1)).toMatchObject({ type: 'error' });
+    expect(failed.at(-1)?.text).toMatch(/session\/load/);
   });
 
   it('keeps local SSH flags unquoted while shell-quoting remote ACP stdio command and args', () => {
