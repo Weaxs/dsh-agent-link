@@ -13,6 +13,7 @@ class BodyTooLargeError extends Error {}
 
 export class McpServer {
   private server?: http.Server;
+  private serverAbort?: AbortController;
   private boundAddress?: { host: string; port: number };
   private readonly allowed: Set<string>;
   private readonly token?: string;
@@ -34,10 +35,12 @@ export class McpServer {
       throw new Error('MCP server must bind to loopback or a specific trusted address, never 0.0.0.0 or ::');
     }
     const port = this.config.port ?? 19_400;
+    this.serverAbort = new AbortController();
     this.server = http.createServer((request, response) => {
       this.handle(request, response).catch((error) => {
         if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        if (!response.writableEnded)
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -64,6 +67,8 @@ export class McpServer {
   }
 
   async close(): Promise<void> {
+    this.serverAbort?.abort(new Error('MCP server closed'));
+    this.serverAbort = undefined;
     if (!this.server) return;
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server!.close(() => resolve()));
@@ -90,20 +95,34 @@ export class McpServer {
     if (batch && messages.length > MAX_BATCH_SIZE) {
       return json(response, 400, { error: `JSON-RPC batch exceeds limit of ${MAX_BATCH_SIZE}` });
     }
-    const replies = [];
-    for (const item of messages) {
-      const reply = await this.rpc(item);
-      if (reply !== undefined) replies.push(reply);
+    const requestAbort = new AbortController();
+    const onServerAbort = () => requestAbort.abort(this.serverAbort?.signal.reason ?? new Error('MCP server closed'));
+    const onResponseClose = () => {
+      if (!response.writableEnded) requestAbort.abort(new Error('client disconnected'));
+    };
+    this.serverAbort?.signal.addEventListener('abort', onServerAbort, { once: true });
+    response.once('close', onResponseClose);
+    try {
+      const replies = [];
+      for (const item of messages) {
+        if (requestAbort.signal.aborted) break;
+        const reply = await this.rpc(item, requestAbort.signal);
+        if (reply !== undefined) replies.push(reply);
+      }
+      if (response.writableEnded || requestAbort.signal.aborted) return;
+      if (replies.length === 0) {
+        response.writeHead(202);
+        response.end();
+        return;
+      }
+      json(response, 200, batch ? replies : replies[0]);
+    } finally {
+      this.serverAbort?.signal.removeEventListener('abort', onServerAbort);
+      response.off('close', onResponseClose);
     }
-    if (replies.length === 0) {
-      response.writeHead(202);
-      response.end();
-      return;
-    }
-    json(response, 200, batch ? replies : replies[0]);
   }
 
-  private async rpc(message: any): Promise<Record<string, unknown> | undefined> {
+  private async rpc(message: any, signal: AbortSignal): Promise<Record<string, unknown> | undefined> {
     if (message?.jsonrpc !== '2.0' || typeof message.method !== 'string')
       return errorReply(message?.id, -32600, 'Invalid JSON-RPC request');
     const id = message.id;
@@ -121,7 +140,7 @@ export class McpServer {
       if (message.method === 'ping') return resultReply(id, {});
       if (message.method === 'tools/list') return resultReply(id, { tools: toolDefinitions() });
       if (message.method === 'tools/call') {
-        const value = await this.callTool(String(message.params?.name ?? ''), message.params?.arguments ?? {});
+        const value = await this.callTool(String(message.params?.name ?? ''), message.params?.arguments ?? {}, signal);
         return resultReply(id, {
           content: [{ type: 'text', text: JSON.stringify(value) }],
           structuredContent: value,
@@ -133,9 +152,13 @@ export class McpServer {
     }
   }
 
-  private async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     if (name === 'dsh_sessions_list') {
-      const value = await this.sessions.list({}, new AbortController().signal);
+      const value = await this.sessions.list({}, signal);
       return {
         sessions: redact(
           value.items
@@ -158,20 +181,32 @@ export class McpServer {
           ...(Number.isSafeInteger(args.beforeSeq) ? { beforeSeq: args.beforeSeq } : {}),
           maxMessages: bounded(args.maxMessages, 100, 1, 500),
         },
-        new AbortController().signal,
+        signal,
       );
       return redact(value);
     }
     if (name === 'dsh_session_watch') {
       const timeoutMs = bounded(args.timeoutMs, 25_000, 1_000, 30_000);
-      return this.watch(sessionId, timeoutMs, bounded(args.since, 0, 0, Number.MAX_SAFE_INTEGER));
+      return this.watch(sessionId, timeoutMs, bounded(args.since, 0, 0, Number.MAX_SAFE_INTEGER), signal);
     }
     throw new Error(`Unknown tool: ${name}`);
   }
 
-  private async watch(sessionId: string, timeoutMs: number, since: number): Promise<Record<string, unknown>> {
+  private async watch(
+    sessionId: string,
+    timeoutMs: number,
+    since: number,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const onParentAbort = () => controller.abort(signal.reason ?? new Error('aborted'));
+    if (signal.aborted) onParentAbort();
+    else signal.addEventListener('abort', onParentAbort, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     const frames: unknown[] = [];
     let bytes = 0;
     let cursor = since;
@@ -206,8 +241,9 @@ export class McpServer {
       if (!controller.signal.aborted) throw error;
     } finally {
       clearTimeout(timer);
+      signal.removeEventListener('abort', onParentAbort);
     }
-    return { sessionId, cursor, frames, timedOut: controller.signal.aborted };
+    return { sessionId, cursor, frames, timedOut };
   }
 
   private assertAllowed(sessionId: string): void {

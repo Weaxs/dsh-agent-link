@@ -62,13 +62,23 @@ export class NodeHttpTransport implements Transport {
         if ((response.statusCode ?? 500) >= 400) {
           const decoder = new StringDecoder('utf8');
           let detail = '';
+          let settled = false;
+          const finish = (err: Error) => {
+            if (settled) return;
+            settled = true;
+            reject(err);
+          };
           response.on('data', (chunk: Buffer) => {
             detail = (detail + decoder.write(chunk)).slice(-16_384);
           });
-          response.on('error', reject);
+          response.on('error', finish);
           response.on('end', () => {
             detail = (detail + decoder.end()).slice(-16_384);
-            reject(new Error(`HTTP ${response.statusCode}: ${detail || response.statusMessage || 'request failed'}`));
+            finish(new Error(`HTTP ${response.statusCode}: ${detail || response.statusMessage || 'request failed'}`));
+          });
+          response.on('close', () => {
+            detail = (detail + decoder.end()).slice(-16_384);
+            finish(new Error(`HTTP ${response.statusCode}: ${detail || response.statusMessage || 'response closed'}`));
           });
           return;
         }
@@ -101,8 +111,20 @@ export class NodeHttpTransport implements Transport {
 }
 
 function responseCleanup(request: http.ClientRequest, cleanup: () => void): void {
-  request.on('close', cleanup);
-  request.on('response', (response) => response.on('close', cleanup));
+  let done = false;
+  let hasResponse = false;
+  const onceCleanup = () => {
+    if (done) return;
+    done = true;
+    cleanup();
+  };
+  request.on('response', (response) => {
+    hasResponse = true;
+    response.once('close', onceCleanup);
+  });
+  request.once('close', () => {
+    if (!hasResponse) onceCleanup();
+  });
 }
 
 export function transportFor(config: AgentConfig): NodeHttpTransport {

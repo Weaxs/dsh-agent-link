@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { once } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 import {
   type ActiveSession,
@@ -287,7 +286,7 @@ export class AcpAdapter implements AgentAdapter {
 
   private openStdio() {
     const spec = acpStdioSpawnSpec(this.config);
-    const child = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = spawn(spec.command, spec.args, { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
     this.child = child;
     child.on('error', (error) => {
       for (const queue of this.queues.values()) queue.fail(error);
@@ -307,7 +306,18 @@ export class AcpAdapter implements AgentAdapter {
     child.stdin!.end();
     if (child.exitCode !== null || child.signalCode !== null) return;
     child.kill();
-    await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 1000))]);
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        child.off('exit', done);
+        child.off('close', done);
+        resolve();
+      };
+      const timer = setTimeout(done, 1000);
+      timer.unref();
+      child.once('exit', done);
+      child.once('close', done);
+    });
   }
 }
 
