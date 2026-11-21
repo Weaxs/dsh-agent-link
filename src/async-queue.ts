@@ -8,6 +8,8 @@ export class AsyncQueue<T> {
   private error: unknown;
   private done = false;
 
+  constructor(private readonly maxBuffer = 0) {}
+
   push(value: T): void {
     if (this.done) return;
     const waiter = this.waiters.shift();
@@ -15,6 +17,7 @@ export class AsyncQueue<T> {
       waiter.cleanup?.();
       waiter.resolve({ value, done: false });
     } else {
+      if (this.maxBuffer > 0 && this.values.length >= this.maxBuffer) this.values.shift();
       this.values.push(value);
     }
   }

@@ -13,7 +13,7 @@ interface Pending {
 export class GatewayWebSocket {
   private ws?: WebSocket;
   private readonly pending = new Map<string, Pending>();
-  private events = new AsyncQueue<Record<string, any>>();
+  private events = new AsyncQueue<Record<string, any>>(64);
   private readonly subscribers = new Set<AsyncQueue<Record<string, any>>>();
   private connected = false;
 
@@ -28,7 +28,7 @@ export class GatewayWebSocket {
 
   async openWebSocket(options: { host: string; port: number; tls?: boolean; origin: string }): Promise<void> {
     if (this.connected) return;
-    this.events = new AsyncQueue<Record<string, any>>();
+    this.events = new AsyncQueue<Record<string, any>>(64);
     const protocol = options.tls ? 'wss' : 'ws';
     const ws = new WebSocket(`${protocol}://${options.host}:${options.port}/`, 'json', {
       origin: options.origin,
@@ -122,7 +122,7 @@ export class GatewayWebSocket {
     next: (signal?: AbortSignal) => Promise<IteratorResult<Record<string, any>>>;
     unsubscribe: () => void;
   } {
-    const queue = new AsyncQueue<Record<string, any>>();
+    const queue = new AsyncQueue<Record<string, any>>(1_024);
     this.subscribers.add(queue);
     return {
       next: (signal?: AbortSignal) => queue.next(signal),

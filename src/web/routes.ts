@@ -134,9 +134,10 @@ export function registerWebRoutes(
       try {
         const body = await parseBody(request);
         const jobId = typeof body.jobId === 'string' ? body.jobId : '';
+        const requestId = typeof body.requestId === 'string' ? body.requestId : '';
         const choice = typeof body.choice === 'string' ? body.choice : '';
-        if (!jobId || !choice) return errorReply('jobId and choice are required', 400);
-        const job = await manager.respond(jobId, choice, request.signal);
+        if (!jobId || !requestId || !choice) return errorReply('jobId, requestId, and choice are required', 400);
+        const job = await manager.respond(jobId, choice, request.signal, requestId);
         return jsonReply({ ok: true, value: job });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);

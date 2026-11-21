@@ -111,13 +111,47 @@ export class McpServer {
     this.serverAbort?.signal.addEventListener('abort', onServerAbort, { once: true });
     response.once('close', onResponseClose);
     try {
-      const replies = [];
+      const entries: Array<{
+        reply: Record<string, unknown>;
+        id: unknown;
+        sessionId?: string;
+        isList?: boolean;
+      }> = [];
       for (const item of messages) {
         if (requestAbort.signal.aborted) break;
         const reply = await this.rpc(item, requestAbort.signal);
-        if (reply !== undefined) replies.push(reply);
+        if (reply !== undefined) {
+          const toolName = item?.method === 'tools/call' ? String(item.params?.name ?? '') : '';
+          const sessionId =
+            toolName === 'dsh_session_read' || toolName === 'dsh_session_watch'
+              ? String(item.params?.arguments?.sessionId ?? '')
+              : undefined;
+          entries.push({ reply, id: item?.id, sessionId, isList: toolName === 'dsh_sessions_list' });
+        }
       }
       if (response.writableEnded || requestAbort.signal.aborted) return;
+      const replies = entries.map((entry) => {
+        if (entry.sessionId && !this.allowed.has(entry.sessionId)) {
+          return errorReply(
+            entry.id,
+            -32000,
+            'This session is not shared. Add its exact id to mcp.allowSessions in the local dsh configuration.',
+          );
+        }
+        if (entry.isList && entry.reply.result && typeof entry.reply.result === 'object') {
+          const res = entry.reply.result as { structuredContent?: { sessions?: Array<{ sessionId?: unknown }> } };
+          if (Array.isArray(res.structuredContent?.sessions)) {
+            const filtered = {
+              sessions: res.structuredContent.sessions.filter((item) => this.allowed.has(String(item.sessionId ?? ''))),
+            };
+            return resultReply(entry.id, {
+              content: [{ type: 'text', text: JSON.stringify(filtered) }],
+              structuredContent: filtered,
+            });
+          }
+        }
+        return entry.reply;
+      });
       if (replies.length === 0) {
         response.writeHead(202);
         response.end();

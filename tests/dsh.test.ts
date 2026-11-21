@@ -6,6 +6,7 @@ class FakeTransport implements Transport {
   readonly kind = 'local' as const;
   readonly calls: HttpRequest[] = [];
   closed = false;
+  private waitSeq = 6;
 
   async request(input: HttpRequest): Promise<HttpResponse> {
     this.calls.push(input);
@@ -28,24 +29,50 @@ class FakeTransport implements Transport {
       case 'session/prompt':
         expect(args.request.content).toEqual([{ type: 'text', text: 'remember AL-TEST' }]);
         return ok({ accepted: true });
-      case 'session/wait':
+      case 'session/events':
+        return ok({
+          cursor: 5,
+          hasMore: false,
+          records: [
+            {
+              type: 'event',
+              event: {
+                type: 'assistant/message',
+                seq: 5,
+                data: { message: { content: [{ type: 'text', text: 'OLD-ANSWER' }] } },
+              },
+            },
+          ],
+        });
+      case 'session/wait': {
+        const nextSeq = ++this.waitSeq;
         return ok({
           reason: 'idle',
-          state: { cursor: 7, active: false, running: false },
+          state: { cursor: nextSeq, active: false, running: false },
           output: {
             records: [
+              // Newest-to-oldest order including a stale record from seq 5
               {
                 type: 'event',
                 event: {
                   type: 'assistant/message',
-                  seq: 7,
+                  seq: nextSeq,
                   data: { message: { content: [{ type: 'text', text: 'AL-TEST' }] } },
+                },
+              },
+              {
+                type: 'event',
+                event: {
+                  type: 'assistant/message',
+                  seq: 5,
+                  data: { message: { content: [{ type: 'text', text: 'OLD-ANSWER' }] } },
                 },
               },
             ],
             truncated: false,
           },
         });
+      }
       case 'session/cancel':
         return ok({ accepted: true });
       default:
@@ -144,7 +171,7 @@ describe('DSH adapter', () => {
     });
     expect(transport.calls.filter((call) => (call.body as any)?.method === 'session/create')).toHaveLength(1);
 
-    // Continuing an uncached historical session already listed on remote DSH skips session/create
+    // Continuing an uncached historical session reads its cursor before prompt and ignores older turns
     const historical = [];
     for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) historical.push(event);
     expect(historical.at(-1)).toMatchObject({
@@ -153,6 +180,10 @@ describe('DSH adapter', () => {
       stopReason: 'idle',
       sessionId: 'dsh-session-1',
     });
+    expect(historical.some((event) => event.text?.includes('OLD-ANSWER'))).toBe(false);
+    const historicalWait = transport.calls.filter((call) => (call.body as any)?.method === 'session/wait').at(-1)
+      ?.body as any;
+    expect(historicalWait.payload.args.request.afterSeq).toBe(5);
     expect(transport.calls.filter((call) => (call.body as any)?.method === 'session/create')).toHaveLength(1);
     expect(transport.calls.some((call) => (call.body as any)?.method === 'session/selectModel')).toBe(true);
     expect(transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body).toMatchObject({

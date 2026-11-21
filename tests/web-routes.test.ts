@@ -119,7 +119,11 @@ describe('web UI host routes & schemastery Config', () => {
 
     const job = manager.start('hermes-local', 'test', undefined);
     await new Promise((resolve) => setTimeout(resolve, 15));
-    const responded = await post(WEB_ROUTES.respond, { jobId: job.id, choice: 'approve' });
+    const stale = await post(WEB_ROUTES.respond, { jobId: job.id, requestId: 'stale-req', choice: 'approve' });
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toMatch(/no longer pending/);
+
+    const responded = await post(WEB_ROUTES.respond, { jobId: job.id, requestId: 'req-1', choice: 'approve' });
     expect(responded.ok).toBe(true);
     expect(adapter.responded).toBe('approve');
 
@@ -226,13 +230,14 @@ describe('web UI host routes & schemastery Config', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(registeredRoutes.sort()).toEqual(Object.values(WEB_ROUTES).sort());
 
-    // tools/pre-execute forces user confirmation ('ask') for agent_respond
+    // tools/pre-execute forces user confirmation ('ask') for agent_respond bound to request_id
     const decision = await (root as any).waterfall(
       'tools/pre-execute',
-      { name: 'agent_respond', arguments: { job: 'job-1', choice: 'approve' } },
+      { name: 'agent_respond', arguments: { job: 'job-1', request_id: 'req-1', choice: 'approve' } },
       async () => ({ kind: 'allow' }),
     );
     expect(decision).toMatchObject({ kind: 'ask' });
+    expect(decision.reason).toContain('req-1');
 
     const passthrough = await (root as any).waterfall(
       'tools/pre-execute',

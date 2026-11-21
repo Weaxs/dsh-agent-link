@@ -423,9 +423,9 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
       }
     };
 
-    const respondApproval = async (jobId: string, choice: string) => {
+    const respondApproval = async (jobId: string, requestId: string, choice: string) => {
       try {
-        await apiPost(ctx, '/api/dsh-knot/respond', { jobId, choice });
+        await apiPost(ctx, '/api/dsh-knot/respond', { jobId, requestId, choice });
         await refreshState();
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err));
@@ -726,7 +726,8 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                                     className: /deny|reject|no/i.test(choice)
                                       ? 'dk-btn dk-btn-danger'
                                       : 'dk-btn dk-btn-primary',
-                                    onClick: () => void respondApproval(job.id, choice),
+                                    onClick: () =>
+                                      void respondApproval(job.id, job.pendingApproval?.requestId ?? '', choice),
                                   },
                                   choice,
                                 ),

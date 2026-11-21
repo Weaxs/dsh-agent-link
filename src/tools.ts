@@ -101,14 +101,19 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
     defineTool({
       name: 'agent_respond',
       description:
-        'Answer a pending approval emitted by a remote agent job. Always requires explicit user confirmation before forwarding.',
+        'Answer a pending approval emitted by a remote agent job. Always requires explicit user confirmation bound to the exact request_id.',
       parameters: {
         job: { type: 'string', required: true },
+        request_id: {
+          type: 'string',
+          required: true,
+          description: 'The exact pendingApproval.requestId from agent_status.',
+        },
         choice: { type: 'string', required: true, description: 'The exact choice offered by the remote agent.' },
       },
       output,
       async execute(args, exec) {
-        return plain(await manager.respond(args.job, args.choice, exec.signal));
+        return plain(await manager.respond(args.job, args.choice, exec.signal, args.request_id));
       },
     }),
   );
@@ -120,13 +125,23 @@ export function registerTools(ctx: Context, manager: AgentManager): void {
       if (decision.kind === 'deny' || decision.kind === 'cancel') return decision;
       const args = exec.arguments as Record<string, unknown> | undefined;
       const jobId = typeof args?.job === 'string' ? args.job : '';
+      const requestId = typeof args?.request_id === 'string' ? args.request_id : '';
       const choice = typeof args?.choice === 'string' ? args.choice : '';
+      let promptDetail = '';
+      try {
+        const pending = manager.get(jobId).pendingApproval;
+        if (pending && pending.requestId === requestId && pending.text) {
+          promptDetail = `: ${pending.text}`;
+        }
+      } catch {
+        /* let execute surface unknown job/request errors if approved */
+      }
       return {
         kind: 'ask',
-        reason: `Remote agent approval requires explicit user confirmation (job ${jobId}, choice "${choice}").`,
+        reason: `Remote agent approval requires explicit user confirmation (job ${jobId}, request ${requestId}, choice "${choice}"${promptDetail}).`,
         displayReason: {
-          en: `Allow sending approval choice "${choice}" to remote job ${jobId}?`,
-          'zh-CN': `确认向远端任务 ${jobId} 提交审批选择「${choice}」吗？`,
+          en: `Allow sending "${choice}" to remote approval ${requestId} on job ${jobId}${promptDetail}?`,
+          'zh-CN': `确认向远端任务 ${jobId} 的审批请求 ${requestId} 提交「${choice}」${promptDetail}吗？`,
         },
       };
     });

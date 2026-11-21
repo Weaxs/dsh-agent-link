@@ -136,5 +136,33 @@ describe('read-only MCP endpoint', () => {
     const result = await pendingWatch;
     expect(result.error?.message).toMatch(/not shared/);
     expect(JSON.stringify(result)).not.toContain('secret after revoke');
+
+    // Batch request [read, watch]: revoking mid-batch also strips the earlier cached read result before sending
+    server.setAllowed('shared', true);
+    const pendingBatch = fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+      body: JSON.stringify([
+        {
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'tools/call',
+          params: { name: 'dsh_session_read', arguments: { sessionId: 'shared' } },
+        },
+        {
+          jsonrpc: '2.0',
+          id: 11,
+          method: 'tools/call',
+          params: { name: 'dsh_session_watch', arguments: { sessionId: 'shared', since: 3, timeoutMs: 5_000 } },
+        },
+      ]),
+    }).then((r) => r.json());
+    await new Promise((r) => setTimeout(r, 25));
+    server.setAllowed('shared', false);
+    const batchReplies = (await pendingBatch) as any[];
+    expect(batchReplies).toHaveLength(2);
+    expect(batchReplies[0].error?.message).toMatch(/not shared/);
+    expect(batchReplies[1].error?.message).toMatch(/not shared/);
+    expect(JSON.stringify(batchReplies)).not.toContain('secret after revoke');
   });
 });

@@ -15,6 +15,7 @@ export class AgentManager {
   private readonly jobs = new Map<string, AgentJob>();
   private readonly completions = new Map<string, Promise<AgentJob>>();
   private readonly controllers = new Map<string, AbortController>();
+  private readonly remoteCancelled = new Set<string>();
 
   constructor(
     configs: AgentConfig[],
@@ -144,20 +145,29 @@ export class AgentManager {
 
   async cancel(id: string, signal?: AbortSignal): Promise<AgentJob> {
     const job = this.get(id);
-    if (['completed', 'failed', 'cancelled'].includes(job.status)) return job;
+    if (job.status === 'completed' || job.status === 'failed') return job;
+    if (job.status === 'cancelled' && this.remoteCancelled.has(id)) return job;
     job.status = 'cancelled';
     delete job.pendingApproval;
     job.updatedAt = Date.now();
     this.controllers.get(id)?.abort(new Error('job cancelled'));
     const adapter = this.adapters.get(job.agentId);
-    if (adapter && job.sessionId) await adapter.cancel(job.sessionId, signal);
+    if (adapter && job.sessionId) {
+      await adapter.cancel(job.sessionId, signal);
+    }
+    this.remoteCancelled.add(id);
     return job;
   }
 
-  async respond(id: string, choice: string, signal?: AbortSignal): Promise<AgentJob> {
+  async respond(id: string, choice: string, signal?: AbortSignal, expectedRequestId?: string): Promise<AgentJob> {
     const job = this.get(id);
     const pending = job.pendingApproval;
     if (!pending) throw new Error(`Job ${id} has no pending approval`);
+    if (expectedRequestId !== undefined && pending.requestId !== expectedRequestId) {
+      throw new Error(
+        `Approval request "${expectedRequestId}" is no longer pending on job ${id} (current: "${pending.requestId}")`,
+      );
+    }
     const adapter = this.adapter(job.agentId);
     if (!adapter.respond) throw new Error(`${job.agentId} does not support approval responses through this adapter`);
     await adapter.respond(job.sessionId!, pending.requestId, choice, signal);
@@ -186,7 +196,10 @@ export class AgentManager {
     if (this.jobs.size <= MAX_JOBS) return;
     for (const [id, job] of this.jobs) {
       if (this.jobs.size <= MAX_JOBS) break;
-      if (['completed', 'failed', 'cancelled'].includes(job.status)) this.jobs.delete(id);
+      if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+        this.jobs.delete(id);
+        this.remoteCancelled.delete(id);
+      }
     }
   }
 

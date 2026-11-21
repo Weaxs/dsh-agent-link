@@ -82,20 +82,30 @@ export class AcpAdapter implements AgentAdapter {
       let active = sessionId ? this.activeSessions.get(sessionId) : undefined;
       if (!active && sessionId) {
         if (!this.loadedSessions.has(sessionId)) {
-          if (!this.capabilities?.loadSession) {
+          const canResume = Boolean(this.capabilities?.sessionCapabilities?.resume);
+          const canLoad = Boolean(this.capabilities?.loadSession);
+          if (canResume) {
+            await this.connection!.agent.request(
+              methods.agent.session.resume,
+              { sessionId, cwd: this.config.dshCwd ?? '/' },
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
+            );
+          } else if (canLoad) {
+            await this.connection!.agent.request(
+              methods.agent.session.load,
+              { sessionId, cwd: this.config.dshCwd ?? '/', mcpServers: [] },
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
+            );
+          } else {
             throw new Error(
-              `ACP agent "${this.id}" does not support session/load; cannot continue uncached session "${sessionId}"`,
+              `ACP agent "${this.id}" does not support session/resume or session/load; cannot continue uncached session "${sessionId}"`,
             );
           }
-          await this.connection!.agent.request(
-            methods.agent.session.load,
-            { sessionId, cwd: this.config.dshCwd ?? '/', mcpServers: [] },
-            { cancellationSignal: signal, stopWaitingOnCancel: true },
-          );
           this.rememberLoadedSession(sessionId);
         }
         actualId = sessionId;
         this.queues.set(actualId, queue);
+        yield { type: 'text', text: '', sessionId: actualId };
         this.connection!.agent.request(
           methods.agent.session.prompt,
           { sessionId: actualId, prompt: [{ type: 'text', text }] },
@@ -126,6 +136,7 @@ export class AcpAdapter implements AgentAdapter {
           actualId = active.sessionId;
         }
         this.queues.set(actualId, queue);
+        yield { type: 'text', text: '', sessionId: actualId };
         const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
         completion.catch((error) => {
           this.queues.get(actualId)?.push({

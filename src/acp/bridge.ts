@@ -9,6 +9,7 @@ import {
   methods,
   ndJsonStream,
   PROTOCOL_VERSION,
+  RequestError,
   type RequestPermissionResponse,
   type SessionUpdate,
   type StopReason,
@@ -122,9 +123,9 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
       protocolVersion: PROTOCOL_VERSION,
       agentInfo: { name: 'dsh-knot-acp-bridge', version: VERSION },
       agentCapabilities: {
-        loadSession: true,
+        loadSession: false,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },
-        sessionCapabilities: { list: {} },
+        sessionCapabilities: { list: {}, resume: {} },
       },
     };
   });
@@ -140,7 +141,11 @@ export function createAcpAgent(config: AgentConfig, adapter: AgentAdapter): Agen
     cancelled.delete(sessionId);
     return { sessionId };
   });
-  app.onRequest(methods.agent.session.load, ({ params }) => {
+  app.onRequest(methods.agent.session.resume, async ({ params, signal }) => {
+    const known =
+      sessionCwds.has(params.sessionId) ||
+      (await adapter.listSessions(signal)).some((session) => session.id === params.sessionId);
+    if (!known) throw RequestError.resourceNotFound(params.sessionId);
     sessionCwds.delete(params.sessionId);
     sessionCwds.set(params.sessionId, params.cwd);
     while (sessionCwds.size > 500) {

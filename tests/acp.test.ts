@@ -67,7 +67,12 @@ describe('ACP provider and bridge', () => {
       await bridge.close();
     });
 
-    expect(await adapter.health()).toMatchObject({ ok: true, protocol: 'acp', protocolVersion: 1 });
+    expect(await adapter.health()).toMatchObject({
+      ok: true,
+      protocol: 'acp',
+      protocolVersion: 1,
+      capabilities: { loadSession: false, sessionCapabilities: { list: {}, resume: {} } },
+    });
     const first = [];
     for await (const event of adapter.prompt(undefined, 'first prompt')) {
       first.push(event);
@@ -110,6 +115,12 @@ describe('ACP provider and bridge', () => {
     }
     expect(resumed.at(-1)).toMatchObject({ type: 'final', text: 'hello world', sessionId: createdSessionId });
     expect(native.prompts.at(-1)?.sessionId).toBe(createdSessionId);
+
+    // Resuming a nonexistent session fails honestly instead of silently accepting
+    const missing = [];
+    for await (const event of freshAdapter.prompt('does-not-exist', 'hello')) missing.push(event);
+    expect(missing.at(-1)).toMatchObject({ type: 'error' });
+    expect(missing.at(-1)?.text).toMatch(/not found/);
   });
 
   it('propagates cancellation through ACP session/cancel', async () => {
@@ -138,9 +149,9 @@ describe('ACP provider and bridge', () => {
     });
 
     const events = [];
-    for await (const event of adapter.prompt('cancel-alias', 'wait')) {
+    for await (const event of adapter.prompt(undefined, 'wait')) {
       events.push(event);
-      if (event.type === 'text') await adapter.cancel('cancel-alias');
+      if (event.type === 'text' && event.text) await adapter.cancel(event.sessionId!);
     }
     expect(native.cancelled).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: 'final', stopReason: 'cancelled' });

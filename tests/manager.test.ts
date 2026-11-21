@@ -42,8 +42,41 @@ describe('AgentManager', () => {
     expect(completed.status).toBe('completed');
     expect(completed.text).toBe('part done');
     expect(notified).toBe(true);
-    await manager.respond(job.id, 'once');
+    await expect(manager.respond(job.id, 'once', undefined, 'wrong-request')).rejects.toThrow(/no longer pending/);
+    await manager.respond(job.id, 'once', undefined, 'r1');
     expect(manager.get(job.id).pendingApproval).toBeUndefined();
+  });
+
+  it('retries remote cancellation after a gateway failure', async () => {
+    let cancelAttempts = 0;
+    class FlakyCancelAdapter extends FakeAdapter {
+      override async *prompt(
+        _session: string | undefined,
+        _text: string,
+        signal?: AbortSignal,
+      ): AsyncIterable<AgentEvent> {
+        yield { type: 'text', text: '', sessionId: 'live-session-1' };
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      override async cancel() {
+        cancelAttempts++;
+        if (cancelAttempts === 1) throw new Error('temporary gateway error');
+        this.cancelled = true;
+      }
+    }
+    const adapter = new FlakyCancelAdapter('remote');
+    const manager = new AgentManager([config], 10_000, () => adapter);
+    const job = manager.start('remote', 'work', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    await expect(manager.cancel(job.id)).rejects.toThrow(/temporary gateway error/);
+    expect(cancelAttempts).toBe(1);
+    const retried = await manager.cancel(job.id);
+    expect(retried.status).toBe('cancelled');
+    expect(cancelAttempts).toBe(2);
+    expect(adapter.cancelled).toBe(true);
   });
 
   it('cancels active work, aborts local stream and rejects unknown agents', async () => {

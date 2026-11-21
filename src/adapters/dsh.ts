@@ -49,6 +49,17 @@ export class DshAdapter implements AgentAdapter {
         if (existingRemote) {
           actualId = sessionId!;
           rememberBounded(this.sessionIds, requestedId, actualId);
+          if (!this.cursors.has(actualId)) {
+            const page = await this.rpc(
+              'events',
+              { address: { kind: 'session', sessionId: actualId }, maxMessages: 1 },
+              signal,
+            );
+            const initialCursor = Number(page.cursor ?? maxRecordSeq(page.records ?? []));
+            if (Number.isFinite(initialCursor) && initialCursor > 0) {
+              rememberBounded(this.cursors, actualId, initialCursor);
+            }
+          }
         } else {
           const created = await this.rpc(
             'create',
@@ -68,6 +79,7 @@ export class DshAdapter implements AgentAdapter {
           rememberBounded(this.sessionIds, actualId, actualId);
         }
       }
+      yield { type: 'text', text: '', sessionId: actualId };
       if (this.config.model) {
         await this.rpc(
           'selectModel',
@@ -105,13 +117,19 @@ export class DshAdapter implements AgentAdapter {
           },
           signal,
         );
-        const records = waited.output?.records ?? [];
+        const rawRecords = Array.isArray(waited.output?.records) ? waited.output.records : [];
+        const records = [...rawRecords]
+          .filter((record: any) => {
+            const seq = recordSeq(record);
+            return seq === undefined || seq > afterSeq;
+          })
+          .sort((a: any, b: any) => (recordSeq(a) ?? 0) - (recordSeq(b) ?? 0));
         for (const record of records) {
           const text = assistantText(record);
           if (text && text !== output) {
             const delta = text.startsWith(output) ? text.slice(output.length) : text;
             output = text;
-            if (delta) yield { type: 'text', text: delta };
+            if (delta) yield { type: 'text', text: delta, sessionId: actualId };
           }
         }
         const cursor = Number(waited.state?.cursor ?? afterSeq);
@@ -243,6 +261,20 @@ function durableFailure(records: any[]): string | undefined {
     }
   }
   return undefined;
+}
+
+function recordSeq(record: any): number | undefined {
+  const seq = record?.event?.seq ?? record?.seq;
+  return typeof seq === 'number' && Number.isFinite(seq) ? seq : undefined;
+}
+
+function maxRecordSeq(records: any[]): number {
+  let max = 0;
+  for (const record of records) {
+    const seq = recordSeq(record);
+    if (seq !== undefined && seq > max) max = seq;
+  }
+  return max;
 }
 
 function assistantText(record: any): string {
