@@ -176,4 +176,38 @@ describe('read-only MCP endpoint', () => {
     expect(batchReplies[1].error?.message).toMatch(/not shared/);
     expect(JSON.stringify(batchReplies)).not.toContain('secret after revoke');
   });
+
+  it('backfills missed records when watch since cursor falls behind the snapshot window', async () => {
+    const gappedSessions: SessionControllerLike = {
+      ...sessions,
+      async events(request) {
+        expect(request.beforeSeq).toBe(10);
+        return {
+          records: [
+            { type: 'event', event: { type: 'assistant/message', seq: 5, data: { text: 'missed-5' } } },
+            { type: 'event', event: { type: 'assistant/message', seq: 8, data: { text: 'missed-8' } } },
+          ],
+          hasMore: false,
+          address: request.address,
+        };
+      },
+      async *follow() {
+        yield {
+          type: 'snapshot',
+          cursor: 10,
+          records: [{ type: 'event', event: { type: 'assistant/message', seq: 10, data: { text: 'snap-10' } } }],
+        };
+      },
+    };
+    server = new McpServer({ port: 0, token: 'test-token', allowSessions: ['shared'] }, gappedSessions);
+    const address = await server.start();
+    base = `http://${address.host}:${address.port}/mcp`;
+
+    const watched = await rpc('tools/call', {
+      name: 'dsh_session_watch',
+      arguments: { sessionId: 'shared', since: 3, timeoutMs: 1_000 },
+    });
+    const records = watched.result.structuredContent.frames[0].records;
+    expect(records.map((r: any) => r.event.seq)).toEqual([5, 8, 10]);
+  });
 });
