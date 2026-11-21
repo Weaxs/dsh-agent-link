@@ -9,10 +9,6 @@ on:
         description: Existing release tag
         required: true
         type: string
-      finalize:
-        description: Create the GitHub release after both npm packages are approved
-        type: boolean
-        default: false
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -38,19 +34,21 @@ jobs:
       - name: Verify tag matches package version
         run: node scripts/sync-version.mjs --check "$RELEASE_TAG"
       - run: npm ci
-        if: ${{ !inputs.finalize }}
       - run: npm run check
-        if: ${{ !inputs.finalize }}
-      - name: Stage scoped package
-        if: ${{ !inputs.finalize }}
-        run: npx --yes npm@11.20.0 stage publish --access public --provenance
+      - name: Publish scoped and unscoped packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Stage unscoped package
-        if: ${{ !inputs.finalize }}
         shell: bash
         run: |
           set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          publish() {
+            if [[ "$(npm view "$1@$version" version 2>/dev/null)" != "$version" ]]; then
+              npx --yes npm@11.20.0 publish --access public --provenance
+            fi
+          }
+
+          publish @weaxs/dsh-knot
           stage="$(mktemp -d)"
           npm pack --pack-destination "$stage"
           tar -xzf "$stage"/*.tgz -C "$stage"
@@ -63,15 +61,11 @@ jobs:
           test -f dist/client.js
           test -f icon.svg
           test -f locale/en.json
-          npx --yes npm@11.20.0 stage publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          publish dsh-knot
       - name: Create GitHub Release
-        if: ${{ inputs.finalize }}
         run: |
-          version="${RELEASE_TAG#v}"
-          test "$(npm view "@weaxs/dsh-knot@$version" version)" = "$version"
-          test "$(npm view "dsh-knot@$version" version)" = "$version"
-          gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

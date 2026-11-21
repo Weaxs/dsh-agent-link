@@ -228,7 +228,9 @@ npm run check
 - SSH troubleshooting: [docs/SSH.md](docs/SSH.md)
 - 24-job live E2E matrix: [docs/E2E.md](docs/E2E.md)
 
-Run `npm run release <semver>` to sync the package and runtime versions, then push tag `v<semver>`. GitHub Actions verifies the build and stages both npm packages with provenance. After approving both packages in npm, run the **Release** workflow with the same tag and **finalize** enabled to create the GitHub Release.
+Run `npm run release <semver>` to sync the package and runtime versions, then push tag `v<semver>`. GitHub Actions verifies the build, publishes both npm packages with provenance, and creates the GitHub Release. To retry an existing tag, run the **Release** workflow from `main` with that tag.
+
+In npm, configure a GitHub Actions [trusted publisher](https://docs.npmjs.com/trusted-publishers/) for both `@weaxs/dsh-knot` and `dsh-knot`. Use owner `Weaxs`, repository `dsh-knot`, workflow `release.yml`, and enable `npm publish`.
 
 ## License
 
