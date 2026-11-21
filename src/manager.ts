@@ -60,8 +60,8 @@ export class AgentManager {
   }
 
   async upsert(config: AgentConfig): Promise<void> {
-    this.abortJobsForAgent(config.id);
     const existing = this.adapters.get(config.id);
+    await this.abortJobsForAgent(config.id, existing);
     if (existing) await existing.close().catch(() => {});
     const index = this.configs.findIndex((item) => item.id === config.id);
     if (index >= 0) this.configs[index] = config;
@@ -70,8 +70,8 @@ export class AgentManager {
   }
 
   async remove(id: string): Promise<boolean> {
-    this.abortJobsForAgent(id);
     const existing = this.adapters.get(id);
+    await this.abortJobsForAgent(id, existing);
     if (!existing) return false;
     this.adapters.delete(id);
     const index = this.configs.findIndex((item) => item.id === id);
@@ -165,7 +165,8 @@ export class AgentManager {
     const job = this.get(id);
     if (job.status === 'completed' || job.status === 'failed') return job;
     if (job.status === 'cancelled' && this.remoteCancelled.has(id)) return job;
-    if (job.sessionId && this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) !== id) {
+    const latest = job.sessionId ? this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) : undefined;
+    if (latest && latest !== id) {
       throw new Error(
         `Cannot cancel job ${id}: session "${job.sessionId}" already has a newer job on agent "${job.agentId}"`,
       );
@@ -211,21 +212,33 @@ export class AgentManager {
     return !job.sessionId || this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) === job.id;
   }
 
-  private abortJobsForAgent(agentId: string): void {
-    const prefix = `${agentId}\0`;
-    for (const key of this.latestSessionJob.keys()) {
-      if (key.startsWith(prefix)) this.latestSessionJob.delete(key);
-    }
+  private async abortJobsForAgent(agentId: string, adapter?: AgentAdapter): Promise<void> {
+    const remoteCancels: Array<Promise<void>> = [];
     for (const [id, job] of this.jobs) {
       if (job.agentId !== agentId || ['completed', 'failed', 'cancelled'].includes(job.status)) continue;
+      const owned = this.isLatestSessionJob(job);
       job.status = 'cancelled';
-      this.remoteCancelled.add(id);
       delete job.pendingApproval;
       job.updatedAt = Date.now();
       const reason = Object.assign(new Error(`agent "${agentId}" reconfigured`), {
         skipRemoteCancel: true,
       });
       this.controllers.get(id)?.abort(reason);
+      if (owned && adapter && job.sessionId) {
+        remoteCancels.push(
+          adapter
+            .cancel(job.sessionId)
+            .then(() => {
+              this.remoteCancelled.add(id);
+            })
+            .catch(() => {}),
+        );
+      }
+    }
+    if (remoteCancels.length > 0) await Promise.allSettled(remoteCancels);
+    const prefix = `${agentId}\0`;
+    for (const key of this.latestSessionJob.keys()) {
+      if (key.startsWith(prefix)) this.latestSessionJob.delete(key);
     }
   }
 

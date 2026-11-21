@@ -326,14 +326,50 @@ describe('AgentManager', () => {
     await manager.cancel(job.id);
     expect(cancelCalls).toBe(2);
 
-    // Replacing the ACP agent config via upsert releases locks from the old adapter
+    // Replacing the ACP agent config via upsert attempts remote cancel on the old adapter before closing it
     const job2 = manager.start('acp-reconfig', 'slow', 'acp-reconfig-sess');
     await new Promise((r) => setTimeout(r, 5));
+    const beforeUpsertCancels = cancelCalls;
     await manager.upsert({ ...acpConfig, model: 'updated-model' });
+    expect(cancelCalls).toBe(beforeUpsertCancels + 1);
     await manager.wait(job2.id);
     const job3 = manager.start('acp-reconfig', 'fast', 'acp-reconfig-sess');
     const settled = await manager.wait(job3.id);
     expect(settled.status).toBe('completed');
     expect(settled.text).toBe('after-upsert');
+
+    // If remote cancel fails during upsert, manual retry of cancel(job) still invokes gateway cancel
+    let failingCancelAttempts = 0;
+    const dshCfg: AgentConfig = { id: 'dsh-reconfig', kind: 'dsh', transport: 'local' };
+    class FailingUpsertCancelAdapter implements AgentAdapter {
+      readonly kind = 'dsh' as const;
+      constructor(readonly id: string) {}
+      async health() {
+        return { ok: true };
+      }
+      async listSessions() {
+        return [];
+      }
+      async *prompt(session: string | undefined, _text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+        yield { type: 'text', text: '', sessionId: session ?? 'dsh-sess-1' };
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      async cancel() {
+        failingCancelAttempts++;
+        if (failingCancelAttempts === 1) throw new Error('gateway unreachable during upsert');
+      }
+      async close() {}
+    }
+    const dshManager = new AgentManager([dshCfg], 10_000, () => new FailingUpsertCancelAdapter('dsh-reconfig'));
+    const dshJob = dshManager.start('dsh-reconfig', 'work', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    await dshManager.upsert({ ...dshCfg, model: 'm2' });
+    expect(failingCancelAttempts).toBe(1);
+    await dshManager.cancel(dshJob.id);
+    expect(failingCancelAttempts).toBe(2);
+    await dshManager.close();
   });
 });
