@@ -279,4 +279,52 @@ describe('ACP provider and bridge', () => {
     expect(resumedCwd).toBe('/repo/page-2');
     expect(events.at(-1)).toMatchObject({ type: 'final', text: 'resumed-ok', sessionId: 'page-2-sess' });
   });
+
+  it('rejects overlapping prompts on the same ACP session without corrupting the active queue', async () => {
+    class SlowAdapter extends FakeNativeAdapter {
+      release!: () => void;
+      override async *prompt(): AsyncIterable<AgentEvent> {
+        yield { type: 'text', text: 'first-turn' };
+        await new Promise<void>((resolve) => {
+          this.release = resolve;
+        });
+        yield { type: 'final', text: 'first-turn', stopReason: 'completed' };
+      }
+    }
+    const native = new SlowAdapter();
+    const bridge = new AcpBridge({ id: 'native', kind: 'hermes' }, () => native);
+    const address = await bridge.start({ port: 0, token: 'acp-test-token' });
+    const adapter = new AcpAdapter('overlap', {
+      id: 'overlap',
+      kind: 'acp',
+      transport: 'local',
+      host: address.host,
+      port: address.port,
+      token: 'acp-test-token',
+    });
+    cleanups.push(async () => {
+      await adapter.close();
+      await bridge.close();
+    });
+
+    const firstEvents: AgentEvent[] = [];
+    let activeSessionId = '';
+    const firstTurn = (async () => {
+      for await (const ev of adapter.prompt(undefined, 'turn 1')) {
+        if (ev.sessionId) activeSessionId = ev.sessionId;
+        firstEvents.push(ev);
+      }
+    })();
+    while (!activeSessionId || !native.release) await new Promise((r) => setTimeout(r, 5));
+
+    // Overlapping prompt on the same session is rejected and does NOT delete or poison turn 1's queue
+    const overlapEvents: AgentEvent[] = [];
+    for await (const ev of adapter.prompt(activeSessionId, 'turn 2')) overlapEvents.push(ev);
+    expect(overlapEvents.at(-1)).toMatchObject({ type: 'error' });
+    expect(overlapEvents.at(-1)?.text).toMatch(/already has an active prompt/);
+
+    native.release();
+    await firstTurn;
+    expect(firstEvents.at(-1)).toMatchObject({ type: 'final', text: 'first-turn' });
+  });
 });

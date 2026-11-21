@@ -56,17 +56,26 @@ export class AcpAdapter implements AgentAdapter {
     return { ok: true, protocol: 'acp', protocolVersion: PROTOCOL_VERSION, capabilities: this.capabilities };
   }
 
-  async listSessions(signal?: AbortSignal, stopWhenId?: string): Promise<AgentSession[]> {
+  async listSessions(signal?: AbortSignal, stopWhenId?: string, maxItems = 100): Promise<AgentSession[]> {
     await this.connect(signal);
     if (!this.capabilities?.sessionCapabilities?.list) return [];
     const sessions: AgentSession[] = [];
     const seenCursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < 50; page++) {
-      const result = await this.connection!.agent.request(methods.agent.session.list, cursor ? { cursor } : {}, {
-        cancellationSignal: signal,
-        stopWaitingOnCancel: true,
-      });
+      let result: {
+        sessions: Array<{ sessionId: string; title?: string | null; cwd?: string | null; updatedAt?: string | null }>;
+        nextCursor?: string | null;
+      };
+      try {
+        result = await this.connection!.agent.request(methods.agent.session.list, cursor ? { cursor } : {}, {
+          cancellationSignal: signal,
+          stopWaitingOnCancel: true,
+        });
+      } catch (error) {
+        if (page > 0 && sessions.length > 0 && !stopWhenId) break;
+        throw error;
+      }
       for (const session of result.sessions) {
         if (session.cwd) this.rememberSessionCwd(session.sessionId, session.cwd);
         sessions.push({
@@ -77,12 +86,13 @@ export class AcpAdapter implements AgentAdapter {
         });
       }
       if (stopWhenId && this.sessionCwds.has(stopWhenId)) break;
+      if (!stopWhenId && maxItems > 0 && sessions.length >= maxItems) break;
       const next = result.nextCursor ?? undefined;
       if (!next || seenCursors.has(next)) break;
       seenCursors.add(next);
       cursor = next;
     }
-    return sessions;
+    return !stopWhenId && maxItems > 0 ? sessions.slice(0, maxItems) : sessions;
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
@@ -121,6 +131,9 @@ export class AcpAdapter implements AgentAdapter {
           this.rememberLoadedSession(sessionId);
         }
         actualId = sessionId;
+        if (this.queues.has(actualId)) {
+          throw new Error(`ACP session "${actualId}" already has an active prompt in progress`);
+        }
         this.queues.set(actualId, queue);
         yield { type: 'text', text: '', sessionId: actualId };
         this.connection!.agent.request(
@@ -152,11 +165,14 @@ export class AcpAdapter implements AgentAdapter {
         } else {
           actualId = active.sessionId;
         }
+        if (this.queues.has(actualId)) {
+          throw new Error(`ACP session "${actualId}" already has an active prompt in progress`);
+        }
         this.queues.set(actualId, queue);
         yield { type: 'text', text: '', sessionId: actualId };
         const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
         completion.catch((error) => {
-          this.queues.get(actualId)?.push({
+          queue.push({
             kind: 'native',
             value: { type: 'error', text: error instanceof Error ? error.message : String(error) },
           });
@@ -196,7 +212,7 @@ export class AcpAdapter implements AgentAdapter {
         yield { type: 'error', text: error instanceof Error ? error.message : String(error) };
       }
     } finally {
-      if (actualId) this.queues.delete(actualId);
+      if (actualId && this.queues.get(actualId) === queue) this.queues.delete(actualId);
       queue.finish();
     }
   }
