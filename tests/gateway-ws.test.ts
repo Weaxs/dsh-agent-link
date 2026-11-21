@@ -90,4 +90,22 @@ describe('OpenClaw WebSocket wire protocol', () => {
     expect(received.some((frame) => frame.method === 'agent' && frame.params.idempotencyKey)).toBe(true);
     await adapter.close();
   });
+
+  it('fails explicitly when an active subscriber queue overflows instead of silently dropping events', async () => {
+    const { AsyncQueue } = await import('../src/async-queue.js');
+    const active = new AsyncQueue<number>(2, 'error');
+    active.push(1);
+    active.push(2);
+    active.push(3);
+    expect((await active.next()).value).toBe(1);
+    expect((await active.next()).value).toBe(2);
+    await expect(active.next()).rejects.toThrow(/Event queue overflow/);
+
+    const idle = new AsyncQueue<number>(2, 'drop-oldest');
+    idle.push(1);
+    idle.push(2);
+    idle.push(3);
+    expect((await idle.next()).value).toBe(2);
+    expect((await idle.next()).value).toBe(3);
+  });
 });

@@ -122,7 +122,7 @@ export class GatewayWebSocket {
     next: (signal?: AbortSignal) => Promise<IteratorResult<Record<string, any>>>;
     unsubscribe: () => void;
   } {
-    const queue = new AsyncQueue<Record<string, any>>(1_024);
+    const queue = new AsyncQueue<Record<string, any>>(1_024, 'error');
     this.subscribers.add(queue);
     return {
       next: (signal?: AbortSignal) => queue.next(signal),

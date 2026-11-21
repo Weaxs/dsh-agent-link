@@ -113,6 +113,8 @@ describe('DSH adapter', () => {
           });
         }
         if (input.path === '/api/session/events') {
+          const req = (input.body as any)?.payload?.args?.request;
+          if (!req?.throughSeq) return ok({ cursor: 10, hasMore: false, records: [] });
           return ok({
             cursor: 19,
             hasMore: false,
@@ -192,5 +194,32 @@ describe('DSH adapter', () => {
     await adapter.cancel('dsh-session-1');
     await adapter.close();
     expect(transport.closed).toBe(true);
+  });
+
+  it('does not cache sessionId before initial cursor lookup succeeds on historical continuation', async () => {
+    process.env.DSH_GATEWAY_TOKEN = 'launch-token';
+    let eventsCalls = 0;
+    class FlakyCursorTransport extends FakeTransport {
+      override async request(input: HttpRequest): Promise<HttpResponse> {
+        if (input.path === '/api/session/events') {
+          eventsCalls++;
+          if (eventsCalls === 1) throw new Error('transient events failure');
+        }
+        return super.request(input);
+      }
+    }
+    const transport = new FlakyCursorTransport();
+    const adapter = new DshAdapter('remote', { id: 'remote', kind: 'dsh', transport: 'local' }, transport);
+
+    const firstAttempt = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) firstAttempt.push(event);
+    expect(firstAttempt.at(-1)).toMatchObject({ type: 'error', text: 'transient events failure' });
+
+    const retry = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) retry.push(event);
+    expect(retry.at(-1)).toMatchObject({ type: 'final', text: 'AL-TEST', sessionId: 'dsh-session-1' });
+    expect(retry.some((event) => event.text?.includes('OLD-ANSWER'))).toBe(false);
+    const waitCall = transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body as any;
+    expect(waitCall.payload.args.request.afterSeq).toBe(5);
   });
 });

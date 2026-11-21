@@ -94,7 +94,12 @@ describe('ACP provider and bridge', () => {
     expect(native.prompts.map((prompt) => prompt.text)).toEqual(['first prompt', 'continuation']);
     expect(new Set(native.prompts.map((prompt) => prompt.sessionId)).size).toBe(1);
     expect(await adapter.listSessions()).toEqual([
-      { id: native.prompts[0]!.sessionId, title: 'ACP session', updatedAt: '2026-01-01T00:00:00.000Z' },
+      {
+        id: native.prompts[0]!.sessionId,
+        title: 'ACP session',
+        cwd: '/',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
     ]);
 
     // A fresh adapter (empty cache) resumes the historical session via session/load without changing sessionId
@@ -115,6 +120,11 @@ describe('ACP provider and bridge', () => {
     }
     expect(resumed.at(-1)).toMatchObject({ type: 'final', text: 'hello world', sessionId: createdSessionId });
     expect(native.prompts.at(-1)?.sessionId).toBe(createdSessionId);
+
+    // Responding with the wrong sessionId is isolated and rejected
+    await expect(freshAdapter.respond('other-session', 'permission-1', 'approve')).rejects.toThrow(
+      /No pending ACP permission request/,
+    );
 
     // Resuming a nonexistent session fails honestly instead of silently accepting
     const missing = [];

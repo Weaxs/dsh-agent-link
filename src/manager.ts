@@ -16,6 +16,7 @@ export class AgentManager {
   private readonly completions = new Map<string, Promise<AgentJob>>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly remoteCancelled = new Set<string>();
+  private readonly latestSessionJob = new Map<string, string>();
 
   constructor(
     configs: AgentConfig[],
@@ -102,6 +103,7 @@ export class AgentManager {
       text: '',
     };
     this.jobs.set(id, job);
+    if (remoteSession) this.latestSessionJob.set(sessionKey(agentId, remoteSession), id);
     this.evictFinishedJobs();
     const completion = this.run(job, adapter, text, remoteSession, onDone);
     this.completions.set(id, completion);
@@ -147,6 +149,11 @@ export class AgentManager {
     const job = this.get(id);
     if (job.status === 'completed' || job.status === 'failed') return job;
     if (job.status === 'cancelled' && this.remoteCancelled.has(id)) return job;
+    if (job.sessionId && this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) !== id) {
+      throw new Error(
+        `Cannot cancel job ${id}: session "${job.sessionId}" already has a newer job on agent "${job.agentId}"`,
+      );
+    }
     job.status = 'cancelled';
     delete job.pendingApproval;
     job.updatedAt = Date.now();
@@ -171,7 +178,9 @@ export class AgentManager {
     const adapter = this.adapter(job.agentId);
     if (!adapter.respond) throw new Error(`${job.agentId} does not support approval responses through this adapter`);
     await adapter.respond(job.sessionId!, pending.requestId, choice, signal);
-    delete job.pendingApproval;
+    if (job.pendingApproval?.requestId === pending.requestId) {
+      delete job.pendingApproval;
+    }
     job.updatedAt = Date.now();
     return job;
   }
@@ -199,6 +208,9 @@ export class AgentManager {
       if (['completed', 'failed', 'cancelled'].includes(job.status)) {
         this.jobs.delete(id);
         this.remoteCancelled.delete(id);
+        if (job.sessionId && this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) === id) {
+          this.latestSessionJob.delete(sessionKey(job.agentId, job.sessionId));
+        }
       }
     }
   }
@@ -220,7 +232,11 @@ export class AgentManager {
     job.updatedAt = Date.now();
     try {
       for await (const event of adapter.prompt(sessionId, text, controller.signal)) {
-        if (event.sessionId) job.sessionId = event.sessionId;
+        if (event.sessionId) {
+          job.sessionId = event.sessionId;
+          const key = sessionKey(job.agentId, event.sessionId);
+          if (!this.latestSessionJob.has(key)) this.latestSessionJob.set(key, job.id);
+        }
         if (event.type === 'text' && event.text) job.text = (job.text + event.text).slice(-2_000_000);
         else if (event.type === 'approval') {
           job.pendingApproval = { requestId: event.requestId ?? '', choices: event.choices ?? [], text: event.text };
@@ -248,6 +264,10 @@ export class AgentManager {
     }
     return job;
   }
+}
+
+function sessionKey(agentId: string, sessionId: string): string {
+  return `${agentId}\0${sessionId}`;
 }
 
 function defaultFactory(config: AgentConfig): AgentAdapter {

@@ -35,6 +35,7 @@ export class AcpAdapter implements AgentAdapter {
   private readonly activeSessions = new Map<string, ActiveSession>();
   private readonly loadedSessions = new Set<string>();
   private readonly sessionIds = new Map<string, string>();
+  private readonly sessionCwds = new Map<string, string>();
   private readonly permissions = new Map<string, PendingPermission>();
   private readonly pumping = new Set<string>();
   private connection?: ClientConnection;
@@ -66,11 +67,15 @@ export class AcpAdapter implements AgentAdapter {
         stopWaitingOnCancel: true,
       },
     );
-    return result.sessions.map((session) => ({
-      id: session.sessionId,
-      title: session.title ?? undefined,
-      updatedAt: session.updatedAt ?? undefined,
-    }));
+    return result.sessions.map((session) => {
+      if (session.cwd) this.rememberSessionCwd(session.sessionId, session.cwd);
+      return {
+        id: session.sessionId,
+        title: session.title ?? undefined,
+        ...(session.cwd ? { cwd: session.cwd } : {}),
+        updatedAt: session.updatedAt ?? undefined,
+      };
+    });
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
@@ -84,21 +89,26 @@ export class AcpAdapter implements AgentAdapter {
         if (!this.loadedSessions.has(sessionId)) {
           const canResume = Boolean(this.capabilities?.sessionCapabilities?.resume);
           const canLoad = Boolean(this.capabilities?.loadSession);
+          if (!canResume && !canLoad) {
+            throw new Error(
+              `ACP agent "${this.id}" does not support session/resume or session/load; cannot continue uncached session "${sessionId}"`,
+            );
+          }
+          if (!this.sessionCwds.has(sessionId) && this.capabilities?.sessionCapabilities?.list) {
+            await this.listSessions(signal).catch(() => {});
+          }
+          const cwd = this.sessionCwds.get(sessionId) ?? this.config.dshCwd ?? '/';
           if (canResume) {
             await this.connection!.agent.request(
               methods.agent.session.resume,
-              { sessionId, cwd: this.config.dshCwd ?? '/' },
-              { cancellationSignal: signal, stopWaitingOnCancel: true },
-            );
-          } else if (canLoad) {
-            await this.connection!.agent.request(
-              methods.agent.session.load,
-              { sessionId, cwd: this.config.dshCwd ?? '/', mcpServers: [] },
+              { sessionId, cwd },
               { cancellationSignal: signal, stopWaitingOnCancel: true },
             );
           } else {
-            throw new Error(
-              `ACP agent "${this.id}" does not support session/resume or session/load; cannot continue uncached session "${sessionId}"`,
+            await this.connection!.agent.request(
+              methods.agent.session.load,
+              { sessionId, cwd, mcpServers: [] },
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
             );
           }
           this.rememberLoadedSession(sessionId);
@@ -194,10 +204,11 @@ export class AcpAdapter implements AgentAdapter {
   }
 
   async respond(sessionId: string, requestId: string, choice: string): Promise<void> {
-    void sessionId;
-    const pending = this.permissions.get(requestId);
-    if (!pending) throw new Error(`No pending ACP permission request ${requestId}`);
-    this.permissions.delete(requestId);
+    const actualId = this.sessionIds.get(sessionId) ?? sessionId;
+    const key = permissionKey(actualId, requestId);
+    const pending = this.permissions.get(key);
+    if (!pending) throw new Error(`No pending ACP permission request ${requestId} for session ${actualId}`);
+    this.permissions.delete(key);
     pending.resolve({ outcome: { outcome: 'selected', optionId: choice } });
   }
 
@@ -222,6 +233,16 @@ export class AcpAdapter implements AgentAdapter {
     this.loadedSessions.clear();
     this.sessionIds.clear();
     this.pumping.clear();
+  }
+
+  private rememberSessionCwd(sessionId: string, cwd: string): void {
+    this.sessionCwds.delete(sessionId);
+    this.sessionCwds.set(sessionId, cwd);
+    while (this.sessionCwds.size > 500) {
+      const oldest = this.sessionCwds.keys().next().value;
+      if (oldest === undefined) break;
+      this.sessionCwds.delete(oldest);
+    }
   }
 
   private rememberLoadedSession(sessionId: string): void {
@@ -317,7 +338,7 @@ export class AcpAdapter implements AgentAdapter {
         },
       });
       return new Promise<RequestPermissionResponse>((resolve) => {
-        this.permissions.set(requestId, { sessionId: params.sessionId, resolve });
+        this.permissions.set(permissionKey(params.sessionId, requestId), { sessionId: params.sessionId, resolve });
       });
     });
     const connection = app.connect(stream);
@@ -388,6 +409,10 @@ export class AcpAdapter implements AgentAdapter {
       child.once('close', done);
     });
   }
+}
+
+function permissionKey(sessionId: string, requestId: string): string {
+  return `${sessionId}\0${requestId}`;
 }
 
 function acpEvent(update: SessionUpdate): AgentEvent | undefined {

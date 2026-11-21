@@ -48,7 +48,6 @@ export class DshAdapter implements AgentAdapter {
         }
         if (existingRemote) {
           actualId = sessionId!;
-          rememberBounded(this.sessionIds, requestedId, actualId);
           if (!this.cursors.has(actualId)) {
             const page = await this.rpc(
               'events',
@@ -56,10 +55,13 @@ export class DshAdapter implements AgentAdapter {
               signal,
             );
             const initialCursor = Number(page.cursor ?? maxRecordSeq(page.records ?? []));
-            if (Number.isFinite(initialCursor) && initialCursor > 0) {
-              rememberBounded(this.cursors, actualId, initialCursor);
-            }
+            rememberBounded(
+              this.cursors,
+              actualId,
+              Number.isFinite(initialCursor) && initialCursor > 0 ? initialCursor : 0,
+            );
           }
+          rememberBounded(this.sessionIds, requestedId, actualId);
         } else {
           const created = await this.rpc(
             'create',
@@ -143,7 +145,11 @@ export class DshAdapter implements AgentAdapter {
             },
             signal,
           );
-          const failure = durableFailure(page.records ?? []);
+          const turnRecords = (page.records ?? []).filter((record: any) => {
+            const seq = recordSeq(record);
+            return seq === undefined || seq > afterSeq;
+          });
+          const failure = durableFailure(turnRecords);
           if (failure) throw new Error(failure);
         }
         rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));

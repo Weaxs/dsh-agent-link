@@ -57,6 +57,7 @@ export interface AgentEvent {
 export interface AgentSession {
   id: string;
   title?: string;
+  cwd?: string;
   updatedAt?: string | number;
 }
 
