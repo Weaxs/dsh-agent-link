@@ -228,7 +228,7 @@ npm run check
 - SSH troubleshooting: [docs/SSH.md](docs/SSH.md)
 - 24-job live E2E matrix: [docs/E2E.md](docs/E2E.md)
 
-Releases are tag-triggered via GitHub Actions: bump with `npm run release <semver>` (syncs `package.json` and `src/version.ts`), push tag `v<semver>`, and CI verifies, publishes both `@weaxs/dsh-knot` and `dsh-knot` with provenance, and creates the GitHub Release.
+Run `npm run release <semver>` to sync the package and runtime versions, then push tag `v<semver>`. GitHub Actions verifies the build and stages both npm packages with provenance. After approving both packages in npm, run the **Release** workflow with the same tag and **finalize** enabled to create the GitHub Release.
 
 ## License
 

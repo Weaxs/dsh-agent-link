@@ -3,6 +3,19 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        type: string
+      finalize:
+        description: Create the GitHub release after both npm packages are approved
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -11,22 +24,30 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
       - name: Verify tag matches package version
-        run: node scripts/sync-version.mjs --check "${GITHUB_REF_NAME}"
+        run: node scripts/sync-version.mjs --check "$RELEASE_TAG"
+      - run: npm ci
+        if: ${{ !inputs.finalize }}
       - run: npm run check
-      - name: Publish scoped package
-        run: npm publish --access public --provenance
+        if: ${{ !inputs.finalize }}
+      - name: Stage scoped package
+        if: ${{ !inputs.finalize }}
+        run: npx --yes npm@11.20.0 stage publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Publish unscoped package
+      - name: Stage unscoped package
+        if: ${{ !inputs.finalize }}
         shell: bash
         run: |
           set -euo pipefail
@@ -42,10 +63,15 @@ jobs:
           test -f dist/client.js
           test -f icon.svg
           test -f locale/en.json
-          npm publish --access public --provenance
+          npx --yes npm@11.20.0 stage publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Create GitHub Release
-        run: gh release create "${GITHUB_REF_NAME}" --generate-notes
+        if: ${{ inputs.finalize }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          test "$(npm view "@weaxs/dsh-knot@$version" version)" = "$version"
+          test "$(npm view "dsh-knot@$version" version)" = "$version"
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
