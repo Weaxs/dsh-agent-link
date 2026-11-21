@@ -95,8 +95,14 @@ export class AgentManager {
     if (adapter.kind === 'acp' && remoteSession) {
       const existingId = this.latestSessionJob.get(sessionKey(agentId, remoteSession));
       const existingJob = existingId ? this.jobs.get(existingId) : undefined;
-      if (existingJob && (existingJob.status === 'queued' || existingJob.status === 'running')) {
-        throw new Error(`ACP session "${remoteSession}" already has an active job (${existingJob.id})`);
+      if (
+        existingJob &&
+        (existingJob.status === 'queued' ||
+          existingJob.status === 'running' ||
+          this.completions.has(existingJob.id) ||
+          (existingJob.status === 'cancelled' && !this.remoteCancelled.has(existingJob.id)))
+      ) {
+        throw new Error(`ACP session "${remoteSession}" still has an active or cancelling job (${existingJob.id})`);
       }
     }
     const id = randomUUID();
@@ -244,7 +250,12 @@ export class AgentManager {
         skipRemoteCancel: !owned,
       });
       controller.abort(reason);
-      if (owned && job.sessionId) adapter.cancel(job.sessionId).catch(() => {});
+      if (owned && job.sessionId) {
+        adapter
+          .cancel(job.sessionId)
+          .then(() => this.remoteCancelled.add(job.id))
+          .catch(() => {});
+      }
     }, this.timeoutMs);
     job.status = 'running';
     job.updatedAt = Date.now();
@@ -261,7 +272,14 @@ export class AgentManager {
         } else if (event.type === 'error') throw new Error(event.text ?? 'remote agent failed');
         else if (event.type === 'final') {
           if (event.text) job.text = event.text.slice(-2_000_000);
-          if (job.status === 'running') job.status = event.stopReason === 'cancelled' ? 'cancelled' : 'completed';
+          if (job.status === 'running') {
+            if (event.stopReason === 'cancelled') {
+              job.status = 'cancelled';
+              this.remoteCancelled.add(job.id);
+            } else {
+              job.status = 'completed';
+            }
+          }
         }
         job.updatedAt = Date.now();
       }

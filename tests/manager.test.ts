@@ -210,10 +210,80 @@ describe('AgentManager', () => {
     const first = manager.start('acp-remote', 'turn 1', undefined);
     await new Promise((r) => setTimeout(r, 10));
     expect(first.sessionId).toBe('acp-sess-1');
-    expect(() => manager.start('acp-remote', 'turn 2', 'acp-sess-1')).toThrow(/already has an active job/);
+    expect(() => manager.start('acp-remote', 'turn 2', 'acp-sess-1')).toThrow(/active or cancelling job/);
     const cancelled = await manager.cancel(first.id);
     expect(cancelled.status).toBe('cancelled');
     expect(cancelledSession).toBe('acp-sess-1');
     await manager.wait(first.id);
+  });
+
+  it('rejects a second ACP turn while cancellation is in-flight or failed, allowing cancel retry before starting turn 2', async () => {
+    let cancelAttempts = 0;
+    let releaseFirstCancel!: () => void;
+    let releaseStreamCleanup!: () => void;
+    const acpConfig: AgentConfig = { id: 'acp-flaky', kind: 'acp', transport: 'local' };
+    class FlakyAcpAdapter implements AgentAdapter {
+      readonly kind = 'acp' as const;
+      constructor(readonly id: string) {}
+      async health() {
+        return { ok: true };
+      }
+      async listSessions() {
+        return [];
+      }
+      async *prompt(session: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+        const sid = session ?? 'acp-sess-2';
+        yield { type: 'text', text: '', sessionId: sid };
+        if (text === 'turn 1') {
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) resolve();
+            else signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          await new Promise<void>((resolve) => {
+            releaseStreamCleanup = resolve;
+          });
+          return;
+        }
+        yield { type: 'final', text: 'turn-2-ok', sessionId: sid };
+      }
+      async cancel() {
+        cancelAttempts++;
+        if (cancelAttempts === 1) {
+          await new Promise<void>((resolve) => {
+            releaseFirstCancel = resolve;
+          });
+          throw new Error('gateway timeout on cancel');
+        }
+      }
+      async close() {}
+    }
+    const manager = new AgentManager([acpConfig], 10_000, () => new FlakyAcpAdapter('acp-flaky'));
+    const first = manager.start('acp-flaky', 'turn 1', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Start cancelling turn 1 — while remote cancel is in-flight, turn 2 must be rejected
+    const firstCancelPromise = manager.cancel(first.id);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(() => manager.start('acp-flaky', 'turn 2', 'acp-sess-2')).toThrow(/active or cancelling job/);
+
+    // First remote cancel fails — turn 2 must STILL be rejected and retry of cancel must succeed
+    releaseFirstCancel();
+    await expect(firstCancelPromise).rejects.toThrow(/gateway timeout on cancel/);
+    expect(() => manager.start('acp-flaky', 'turn 2', 'acp-sess-2')).toThrow(/active or cancelling job/);
+
+    await manager.cancel(first.id);
+    expect(cancelAttempts).toBe(2);
+
+    // While local stream cleanup hasn't finished yet, turn 2 is still rejected
+    expect(() => manager.start('acp-flaky', 'turn 2', 'acp-sess-2')).toThrow(/active or cancelling job/);
+
+    // Once stream cleanup finishes and remote cancel succeeded, turn 2 is admitted
+    releaseStreamCleanup();
+    await manager.wait(first.id);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = manager.start('acp-flaky', 'turn 2', 'acp-sess-2');
+    const done = await manager.wait(second.id);
+    expect(done.status).toBe('completed');
+    expect(done.text).toBe('turn-2-ok');
   });
 });
