@@ -96,13 +96,16 @@ export class AgentManager {
       const existingId = this.latestSessionJob.get(sessionKey(agentId, remoteSession));
       const existingJob = existingId ? this.jobs.get(existingId) : undefined;
       if (
-        existingJob &&
-        (existingJob.status === 'queued' ||
-          existingJob.status === 'running' ||
-          this.completions.has(existingJob.id) ||
-          (existingJob.status === 'cancelled' && !this.remoteCancelled.has(existingJob.id)))
+        adapter.isSessionBusy?.(remoteSession) ||
+        (existingJob &&
+          (existingJob.status === 'queued' ||
+            existingJob.status === 'running' ||
+            this.completions.has(existingJob.id) ||
+            (existingJob.status === 'cancelled' && !this.remoteCancelled.has(existingJob.id))))
       ) {
-        throw new Error(`ACP session "${remoteSession}" still has an active or cancelling job (${existingJob.id})`);
+        throw new Error(
+          `ACP session "${remoteSession}" still has an active or cancelling job (${existingJob?.id ?? remoteSession})`,
+        );
       }
     }
     const id = randomUUID();
@@ -209,13 +212,18 @@ export class AgentManager {
   }
 
   private abortJobsForAgent(agentId: string): void {
+    const prefix = `${agentId}\0`;
+    for (const key of this.latestSessionJob.keys()) {
+      if (key.startsWith(prefix)) this.latestSessionJob.delete(key);
+    }
     for (const [id, job] of this.jobs) {
       if (job.agentId !== agentId || ['completed', 'failed', 'cancelled'].includes(job.status)) continue;
       job.status = 'cancelled';
+      this.remoteCancelled.add(id);
       delete job.pendingApproval;
       job.updatedAt = Date.now();
       const reason = Object.assign(new Error(`agent "${agentId}" reconfigured`), {
-        skipRemoteCancel: !this.isLatestSessionJob(job),
+        skipRemoteCancel: true,
       });
       this.controllers.get(id)?.abort(reason);
     }
@@ -275,7 +283,7 @@ export class AgentManager {
           if (job.status === 'running') {
             if (event.stopReason === 'cancelled') {
               job.status = 'cancelled';
-              this.remoteCancelled.add(job.id);
+              if (!controller.signal.aborted) this.remoteCancelled.add(job.id);
             } else {
               job.status = 'completed';
             }

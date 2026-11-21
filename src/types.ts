@@ -69,6 +69,7 @@ export interface AgentAdapter {
   prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent>;
   cancel(sessionId: string, signal?: AbortSignal): Promise<void>;
   respond?(sessionId: string, requestId: string, choice: string, signal?: AbortSignal): Promise<void>;
+  isSessionBusy?(sessionId: string): boolean;
   close(): Promise<void>;
 }
 

@@ -327,4 +327,55 @@ describe('ACP provider and bridge', () => {
     await firstTurn;
     expect(firstEvents.at(-1)).toMatchObject({ type: 'final', text: 'first-turn' });
   });
+
+  it('keeps an ACP session busy after cancel() until the remote session/prompt returns its terminal response', async () => {
+    const { AgentManager } = await import('../src/manager.js');
+    let finishRemotePrompt!: () => void;
+    class DelayedStopAdapter extends FakeNativeAdapter {
+      override async *prompt(_sid: string | undefined, text: string): AsyncIterable<AgentEvent> {
+        if (text === 'turn 1') {
+          yield { type: 'text', text: 'working' };
+          await new Promise<void>((resolve) => {
+            finishRemotePrompt = resolve;
+          });
+          yield { type: 'final', text: 'working', stopReason: 'cancelled' };
+          return;
+        }
+        yield { type: 'final', text: 'turn-2-done', stopReason: 'completed' };
+      }
+    }
+    const native = new DelayedStopAdapter();
+    const bridge = new AcpBridge({ id: 'native', kind: 'hermes' }, () => native);
+    const address = await bridge.start({ port: 0, token: 'acp-test-token' });
+    const cfg = {
+      id: 'delayed',
+      kind: 'acp' as const,
+      transport: 'local' as const,
+      host: address.host,
+      port: address.port,
+      token: 'acp-test-token',
+    };
+    const manager = new AgentManager([cfg], 10_000);
+    cleanups.push(async () => {
+      await manager.close();
+      await bridge.close();
+    });
+
+    const first = manager.start('delayed', 'turn 1', undefined);
+    while (!first.sessionId || !finishRemotePrompt) await new Promise((r) => setTimeout(r, 5));
+    const sid = first.sessionId;
+
+    await manager.cancel(first.id);
+    await manager.wait(first.id);
+    // Remote session/prompt has not returned its terminal response yet — turn 2 must still be rejected
+    expect(() => manager.start('delayed', 'turn 2', sid)).toThrow(/active or cancelling job/);
+
+    // Once the remote agent finishes turn 1, turn 2 is allowed
+    finishRemotePrompt();
+    await new Promise((r) => setTimeout(r, 25));
+    const second = manager.start('delayed', 'turn 2', sid);
+    const settled = await manager.wait(second.id);
+    expect(settled.status).toBe('completed');
+    expect(settled.text).toBe('turn-2-done');
+  });
 });

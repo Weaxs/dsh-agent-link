@@ -286,4 +286,54 @@ describe('AgentManager', () => {
     expect(done.status).toBe('completed');
     expect(done.text).toBe('turn-2-ok');
   });
+
+  it('preserves cancel retry after failed timeout cancel and releases session locks when ACP agent config is replaced', async () => {
+    let cancelCalls = 0;
+    const acpConfig: AgentConfig = { id: 'acp-reconfig', kind: 'acp', transport: 'local' };
+    class TimeoutCancelAdapter implements AgentAdapter {
+      readonly kind = 'acp' as const;
+      constructor(readonly id: string) {}
+      async health() {
+        return { ok: true };
+      }
+      async listSessions() {
+        return [];
+      }
+      async *prompt(session: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+        const sid = session ?? 'acp-reconfig-sess';
+        yield { type: 'text', text: '', sessionId: sid };
+        if (text === 'slow') {
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) resolve();
+            else signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          yield { type: 'final', text: '', stopReason: 'cancelled', sessionId: sid };
+          return;
+        }
+        yield { type: 'final', text: 'after-upsert', sessionId: sid };
+      }
+      async cancel() {
+        cancelCalls++;
+        if (cancelCalls === 1) throw new Error('timeout cancel failed');
+      }
+      async close() {}
+    }
+    const manager = new AgentManager([acpConfig], 30, () => new TimeoutCancelAdapter('acp-reconfig'));
+    const job = manager.start('acp-reconfig', 'slow', undefined);
+    await manager.wait(job.id);
+    // Timeout's adapter.cancel failed on attempt 1, so locally synthesized final/cancelled must NOT block retry
+    expect(cancelCalls).toBe(1);
+    await manager.cancel(job.id);
+    expect(cancelCalls).toBe(2);
+
+    // Replacing the ACP agent config via upsert releases locks from the old adapter
+    const job2 = manager.start('acp-reconfig', 'slow', 'acp-reconfig-sess');
+    await new Promise((r) => setTimeout(r, 5));
+    await manager.upsert({ ...acpConfig, model: 'updated-model' });
+    await manager.wait(job2.id);
+    const job3 = manager.start('acp-reconfig', 'fast', 'acp-reconfig-sess');
+    const settled = await manager.wait(job3.id);
+    expect(settled.status).toBe('completed');
+    expect(settled.text).toBe('after-upsert');
+  });
 });

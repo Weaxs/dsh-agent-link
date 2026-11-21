@@ -32,6 +32,7 @@ export class AcpAdapter implements AgentAdapter {
   readonly kind = 'acp' as const;
   private readonly transport: Transport;
   private readonly queues = new Map<string, AsyncQueue<PromptMessage>>();
+  private readonly inFlightPrompts = new Map<string, Promise<void>>();
   private readonly activeSessions = new Map<string, ActiveSession>();
   private readonly loadedSessions = new Set<string>();
   private readonly sessionIds = new Map<string, string>();
@@ -95,6 +96,11 @@ export class AcpAdapter implements AgentAdapter {
     return !stopWhenId && maxItems > 0 ? sessions.slice(0, maxItems) : sessions;
   }
 
+  isSessionBusy(sessionId: string): boolean {
+    const actualId = this.sessionIds.get(sessionId) ?? sessionId;
+    return this.queues.has(actualId) || this.inFlightPrompts.has(actualId);
+  }
+
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
     let actualId = sessionId ?? '';
     let output = '';
@@ -131,16 +137,17 @@ export class AcpAdapter implements AgentAdapter {
           this.rememberLoadedSession(sessionId);
         }
         actualId = sessionId;
-        if (this.queues.has(actualId)) {
+        if (this.queues.has(actualId) || this.inFlightPrompts.has(actualId)) {
           throw new Error(`ACP session "${actualId}" already has an active prompt in progress`);
         }
         this.queues.set(actualId, queue);
         yield { type: 'text', text: '', sessionId: actualId };
-        this.connection!.agent.request(
-          methods.agent.session.prompt,
-          { sessionId: actualId, prompt: [{ type: 'text', text }] },
-          { cancellationSignal: signal, stopWaitingOnCancel: true },
-        ).then(
+        const remotePrompt = this.connection!.agent.request(methods.agent.session.prompt, {
+          sessionId: actualId,
+          prompt: [{ type: 'text', text }],
+        });
+        this.trackInFlight(actualId, remotePrompt);
+        remotePrompt.then(
           (response) => {
             queue.push({
               kind: 'native',
@@ -165,12 +172,13 @@ export class AcpAdapter implements AgentAdapter {
         } else {
           actualId = active.sessionId;
         }
-        if (this.queues.has(actualId)) {
+        if (this.queues.has(actualId) || this.inFlightPrompts.has(actualId)) {
           throw new Error(`ACP session "${actualId}" already has an active prompt in progress`);
         }
         this.queues.set(actualId, queue);
         yield { type: 'text', text: '', sessionId: actualId };
-        const completion = active.prompt(text, { cancellationSignal: signal, stopWaitingOnCancel: true });
+        const completion = active.prompt(text);
+        this.trackInFlight(actualId, completion);
         completion.catch((error) => {
           queue.push({
             kind: 'native',
@@ -252,10 +260,22 @@ export class AcpAdapter implements AgentAdapter {
     await this.transport.close();
   }
 
+  private trackInFlight(sessionId: string, promise: Promise<unknown>): void {
+    const settled = promise.then(
+      () => {},
+      () => {},
+    );
+    this.inFlightPrompts.set(sessionId, settled);
+    void settled.finally(() => {
+      if (this.inFlightPrompts.get(sessionId) === settled) this.inFlightPrompts.delete(sessionId);
+    });
+  }
+
   private clearSessions(): void {
     for (const session of new Set(this.activeSessions.values())) session.dispose();
     this.activeSessions.clear();
     this.loadedSessions.clear();
+    this.inFlightPrompts.clear();
     this.sessionIds.clear();
     this.pumping.clear();
   }
