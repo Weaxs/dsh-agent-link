@@ -120,6 +120,8 @@ export class HermesAdapter implements AgentAdapter {
       const state = String(status.status ?? '');
       const finalText = textOf(status.output_text ?? status.output ?? status.response ?? status.message);
       if (state === 'completed') yield { type: 'final', text: finalText || output, stopReason: state };
+      else if (state === 'cancelled' || state === 'canceled')
+        yield { type: 'final', text: finalText || output, stopReason: 'cancelled' };
       else if (state)
         yield {
           type: 'error',

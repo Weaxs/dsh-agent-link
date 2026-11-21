@@ -62,6 +62,23 @@ export function registerWebRoutes(
 ): void {
   const resolveSessions = (): SessionControllerLike | undefined =>
     typeof sessions === 'function' ? sessions() : sessions;
+  const agentRouteLocks = new Map<string, Promise<void>>();
+  const withAgentRouteLock = async <T>(id: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = agentRouteLocks.get(id) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chained = prev.then(() => next);
+    agentRouteLocks.set(id, chained);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (agentRouteLocks.get(id) === chained) agentRouteLocks.delete(id);
+    }
+  };
 
   const mountAll = (targetCtx: Context) => {
     const conn =
@@ -243,12 +260,14 @@ export function registerWebRoutes(
           if (candidate[key] === undefined) delete candidate[key];
         }
         const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
-        await manager.upsert(normalized!);
-        updateStoredState((state) => ({
-          ...state,
-          agents: [...state.agents.filter((item) => item.id !== normalized!.id), normalized!],
-          deletedIds: state.deletedIds.filter((item) => item !== normalized!.id),
-        }));
+        await withAgentRouteLock(normalized!.id, async () => {
+          await manager.upsert(normalized!);
+          updateStoredState((state) => ({
+            ...state,
+            agents: [...state.agents.filter((item) => item.id !== normalized!.id), normalized!],
+            deletedIds: state.deletedIds.filter((item) => item !== normalized!.id),
+          }));
+        });
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
@@ -260,12 +279,14 @@ export function registerWebRoutes(
         const body = await parseBody(request);
         const id = typeof body.id === 'string' ? body.id.trim() : '';
         if (!id) return errorReply('id is required', 400);
-        await manager.remove(id);
-        updateStoredState((state) => ({
-          ...state,
-          agents: state.agents.filter((item) => item.id !== id),
-          deletedIds: [...new Set([...state.deletedIds, id])],
-        }));
+        await withAgentRouteLock(id, async () => {
+          await manager.remove(id);
+          updateStoredState((state) => ({
+            ...state,
+            agents: state.agents.filter((item) => item.id !== id),
+            deletedIds: [...new Set([...state.deletedIds, id])],
+          }));
+        });
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);

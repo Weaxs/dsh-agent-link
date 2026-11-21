@@ -1,9 +1,11 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as plugin from '../src/index.js';
+
 import { apply, Config } from '../src/index.js';
 import { AgentManager } from '../src/manager.js';
 import { McpServer } from '../src/mcp/server.js';
@@ -258,5 +260,45 @@ describe('web UI host routes & schemastery Config', () => {
     expect(passthrough).toEqual({ kind: 'allow' });
 
     await fiber.dispose();
+  });
+
+  it('activates the client entry in real Cordis 4.1.0 without locale injected and mounts main + sidebar slots', async () => {
+    const clientPlugin = await import('../src/client/index.js');
+    const mod = createRequire(import.meta.url)('node:module') as {
+      _load: (req: string, parent: unknown, isMain: boolean) => unknown;
+    };
+    const origLoad = mod._load;
+    mod._load = (req, parent, isMain) => {
+      if (req === 'react') {
+        return {
+          createElement: () => null,
+          useState: (v: unknown) => [v, () => {}],
+          useEffect: () => {},
+          useCallback: (fn: unknown) => fn,
+          useRef: (v: unknown) => ({ current: v }),
+        };
+      }
+      return origLoad(req, parent, isMain);
+    };
+    try {
+      const root = new Context();
+      const mountedSlots: string[] = [];
+      (root as any).provide('slots');
+      (root as any).set('slots', {
+        inject(name: string, factory: () => () => void) {
+          mountedSlots.push(name);
+          return factory();
+        },
+        register() {
+          return () => {};
+        },
+      });
+      const fiber = root.plugin(clientPlugin as any, {});
+      await fiber;
+      expect(mountedSlots.sort()).toEqual(['main', 'sidebar.panellist']);
+      await fiber.dispose();
+    } finally {
+      mod._load = origLoad;
+    }
   });
 });

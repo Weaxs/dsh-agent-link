@@ -78,6 +78,27 @@ describe('Hermes API Server adapter', () => {
     for await (const event of adapter.prompt('session-1', 'task')) events.push(event);
     expect(events.filter((e) => e.type === 'approval')).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: 'final', text: 'partial', stopReason: 'cancelled' });
+
+    // Status fallback also maps cancelled to final/cancelled instead of error
+    class CancelledFallbackTransport extends FakeTransport {
+      override async stream(): Promise<IncomingMessage> {
+        return incoming(': empty stream ended early\n\n');
+      }
+      override async request(request: HttpRequest): Promise<HttpResponse> {
+        if (request.path === '/v1/runs/run_1') {
+          return { status: 200, headers: {}, text: '{"status":"cancelled","output":"partial-fallback"}' };
+        }
+        return super.request(request);
+      }
+    }
+    const fallbackAdapter = new HermesAdapter(
+      'hermes',
+      { id: 'hermes', kind: 'hermes', transport: 'local' },
+      new CancelledFallbackTransport(),
+    );
+    const fbEvents = [];
+    for await (const event of fallbackAdapter.prompt('session-1', 'task')) fbEvents.push(event);
+    expect(fbEvents.at(-1)).toMatchObject({ type: 'final', text: 'partial-fallback', stopReason: 'cancelled' });
   });
 });
 

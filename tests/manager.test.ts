@@ -370,8 +370,25 @@ describe('AgentManager', () => {
     await new Promise((r) => setTimeout(r, 10));
     await dshManager.upsert({ ...dshCfg, model: 'm2' });
     expect(failingCancelAttempts).toBe(1);
-    await expect(dshManager.cancel(dshJob.id)).rejects.toThrow(/reconfigured to a different gateway/);
+    await expect(dshManager.cancel(dshJob.id)).rejects.toThrow(/reconfigured or removed/);
     expect(failingCancelAttempts).toBe(1);
+
+    // After remove() fails remote cancel, retrying cancel(job) also rejects instead of falsely returning cancelled
+    let failOnRemoveAttempts = 0;
+    const rmFailCfg: AgentConfig = { id: 'rm-fail', kind: 'dsh', transport: 'local' };
+    class RemoveFailAdapter extends FailingUpsertCancelAdapter {
+      override async cancel() {
+        failOnRemoveAttempts++;
+        throw new Error('gateway unreachable on remove');
+      }
+    }
+    const rmFailManager = new AgentManager([rmFailCfg], 10_000, () => new RemoveFailAdapter('rm-fail'));
+    const rmFailJob = rmFailManager.start('rm-fail', 'work', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    await rmFailManager.remove('rm-fail');
+    expect(failOnRemoveAttempts).toBe(1);
+    await expect(rmFailManager.cancel(rmFailJob.id)).rejects.toThrow(/reconfigured or removed/);
+    await rmFailManager.wait(rmFailJob.id);
 
     // While remove() is awaiting remote cancel, new jobs on that agent are immediately rejected
     let releaseRemoveCancel!: () => void;

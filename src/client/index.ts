@@ -29,6 +29,7 @@ interface ClientContext {
   locale?: ClientLocale;
   slots?: ClientSlots;
   connection?: ClientConnection;
+  get?(name: string): unknown;
   effect?(fn: () => (() => void) | undefined, label?: string): void;
 }
 
@@ -311,8 +312,14 @@ function injectStyles(): () => void {
   };
 }
 
+function getClientService<T>(ctx: ClientContext, key: 'locale' | 'slots' | 'connection'): T | undefined {
+  if (typeof ctx.get === 'function') return ctx.get(key) as T | undefined;
+  return ctx[key] as T | undefined;
+}
+
 async function apiPost<T>(ctx: ClientContext, path: string, body: Record<string, unknown> = {}): Promise<T> {
-  const fetcher = typeof ctx.connection?.fetch === 'function' ? ctx.connection.fetch.bind(ctx.connection) : fetch;
+  const conn = getClientService<ClientConnection>(ctx, 'connection');
+  const fetcher = typeof conn?.fetch === 'function' ? conn.fetch.bind(conn) : fetch;
   const response = await fetcher(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -331,7 +338,8 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
   const h = React.createElement;
 
   return function KnotDashboard() {
-    const initialLang = String(ctx.locale?.current ?? 'zh').startsWith('en') ? 'en' : 'zh-CN';
+    const locale = getClientService<ClientLocale>(ctx, 'locale');
+    const initialLang = String(locale?.current ?? 'zh').startsWith('en') ? 'en' : 'zh-CN';
     const [lang, setLang] = React.useState<'zh-CN' | 'en'>(initialLang);
     const [state, setState] = React.useState<KnotState | null>(null);
     const [error, setError] = React.useState<string | null>(null);
@@ -1297,31 +1305,34 @@ function makeIcon(React: ReactModule) {
 }
 
 export const name = NS;
+export const inject = ['slots'];
 
 export function apply(ctx: ClientContext): void {
   const React = require('react') as ReactModule;
+  const locale = getClientService<ClientLocale>(ctx, 'locale');
+  const slots = getClientService<ClientSlots>(ctx, 'slots');
   ctx.effect?.(() => injectStyles(), 'dsh-knot: styles');
-  ctx.effect?.(() => ctx.locale?.register?.(NS, DICTS), 'dsh-knot: locale');
-  const t = ctx.locale?.bind?.(NS) ?? ((key: string) => DICTS['zh-CN']?.[key] ?? key);
+  ctx.effect?.(() => locale?.register?.(NS, DICTS), 'dsh-knot: locale');
+  const t = locale?.bind?.(NS) ?? ((key: string) => DICTS['zh-CN']?.[key] ?? key);
   const Dashboard = makeDashboard(React, ctx);
   const Icon = makeIcon(React);
 
   ctx.effect?.(
     () =>
-      ctx.slots?.inject?.(
+      slots?.inject?.(
         'main',
         () =>
-          ctx.slots?.register?.({ name: 'main', key: PANEL_ID, locale: NS }, () => React.createElement(Dashboard)) ??
+          slots?.register?.({ name: 'main', key: PANEL_ID, locale: NS }, () => React.createElement(Dashboard)) ??
           (() => {}),
       ),
     'dsh-knot: main panel',
   );
   ctx.effect?.(
     () =>
-      ctx.slots?.inject?.(
+      slots?.inject?.(
         'sidebar.panellist',
         () =>
-          ctx.slots?.register?.(
+          slots?.register?.(
             { name: 'sidebar.panellist', id: PANEL_ID, order: 25, label: () => t('title'), locale: NS },
             (props) => React.createElement(Icon, props),
           ) ?? (() => {}),

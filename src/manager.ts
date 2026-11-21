@@ -19,6 +19,7 @@ export class AgentManager {
   private readonly remoteCancelled = new Set<string>();
   private readonly latestSessionJob = new Map<string, string>();
   private readonly reconfiguring = new Set<string>();
+  private readonly agentLocks = new Map<string, Promise<void>>();
 
   constructor(
     configs: AgentConfig[],
@@ -64,41 +65,45 @@ export class AgentManager {
   }
 
   async upsert(config: AgentConfig): Promise<void> {
-    this.reconfiguring.add(config.id);
-    const existing = this.adapters.get(config.id);
-    this.adapters.delete(config.id);
-    try {
-      await this.abortJobsForAgent(config.id, existing);
-      if (existing) {
-        await existing.close().catch(() => {
-          /* best-effort cleanup of replaced adapter */
-        });
+    return this.withAgentLock(config.id, async () => {
+      this.reconfiguring.add(config.id);
+      const existing = this.adapters.get(config.id);
+      this.adapters.delete(config.id);
+      try {
+        await this.abortJobsForAgent(config.id, existing);
+        if (existing) {
+          await existing.close().catch(() => {
+            /* best-effort cleanup of replaced adapter */
+          });
+        }
+        const index = this.configs.findIndex((item) => item.id === config.id);
+        if (index >= 0) this.configs[index] = config;
+        else this.configs.push(config);
+        this.adapters.set(config.id, this.factory(config));
+      } finally {
+        this.reconfiguring.delete(config.id);
       }
-      const index = this.configs.findIndex((item) => item.id === config.id);
-      if (index >= 0) this.configs[index] = config;
-      else this.configs.push(config);
-      this.adapters.set(config.id, this.factory(config));
-    } finally {
-      this.reconfiguring.delete(config.id);
-    }
+    });
   }
 
   async remove(id: string): Promise<boolean> {
-    this.reconfiguring.add(id);
-    const existing = this.adapters.get(id);
-    this.adapters.delete(id);
-    const index = this.configs.findIndex((item) => item.id === id);
-    if (index >= 0) this.configs.splice(index, 1);
-    try {
-      await this.abortJobsForAgent(id, existing);
-      if (!existing) return false;
-      await existing.close().catch(() => {
-        /* best-effort cleanup of removed adapter */
-      });
-      return true;
-    } finally {
-      this.reconfiguring.delete(id);
-    }
+    return this.withAgentLock(id, async () => {
+      this.reconfiguring.add(id);
+      const existing = this.adapters.get(id);
+      this.adapters.delete(id);
+      const index = this.configs.findIndex((item) => item.id === id);
+      if (index >= 0) this.configs.splice(index, 1);
+      try {
+        await this.abortJobsForAgent(id, existing);
+        if (!existing) return false;
+        await existing.close().catch(() => {
+          /* best-effort cleanup of removed adapter */
+        });
+        return true;
+      } finally {
+        this.reconfiguring.delete(id);
+      }
+    });
   }
 
   adapter(id: string): AgentAdapter {
@@ -198,8 +203,8 @@ export class AgentManager {
     }
     const currentAdapter = this.adapters.get(job.agentId);
     const originalAdapter = this.jobAdapters.get(id);
-    if (originalAdapter && currentAdapter && currentAdapter !== originalAdapter) {
-      throw new Error(`Cannot cancel job ${id}: agent "${job.agentId}" has been reconfigured to a different gateway`);
+    if (originalAdapter && currentAdapter !== originalAdapter) {
+      throw new Error(`Cannot cancel job ${id}: agent "${job.agentId}" has been reconfigured or removed`);
     }
     job.status = 'cancelled';
     delete job.pendingApproval;
@@ -240,6 +245,23 @@ export class AgentManager {
     for (const controller of this.controllers.values()) controller.abort(new Error('manager closed'));
     this.controllers.clear();
     await Promise.allSettled([...this.adapters.values()].map((adapter) => adapter.close()));
+  }
+
+  private async withAgentLock<T>(agentId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.agentLocks.get(agentId) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chained = prev.then(() => next);
+    this.agentLocks.set(agentId, chained);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.agentLocks.get(agentId) === chained) this.agentLocks.delete(agentId);
+    }
   }
 
   private isLatestSessionJob(job: AgentJob): boolean {

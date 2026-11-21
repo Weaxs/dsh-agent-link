@@ -272,42 +272,93 @@ export class McpServer {
       )) {
         this.assertAllowed(sessionId);
         if (frame.type === 'assistant-stream') continue;
-        if (frame.type === 'snapshot' && typeof frame.cursor === 'number') cursor = Math.max(cursor, frame.cursor);
         const event = frame.event as { seq?: number } | undefined;
         if (typeof event?.seq === 'number') {
           cursor = Math.max(cursor, event.seq);
           if (event.seq <= since) continue;
         }
         let projected: Record<string, unknown> = frame;
-        if (frame.type === 'snapshot' && since > 0 && Array.isArray(frame.records)) {
-          const filtered = frame.records.filter(
-            (record: any) => typeof record.event?.seq !== 'number' || record.event.seq > since,
-          );
-          const seqs = frame.records
-            .map((record: any) => record?.event?.seq)
-            .filter((seq: unknown): seq is number => typeof seq === 'number');
-          const earliest = seqs.length > 0 ? Math.min(...seqs) : undefined;
-          let backfilled = filtered;
-          if (earliest !== undefined && earliest > since + 1) {
-            const older = await this.sessions.events(
-              { address: { kind: 'session', sessionId }, beforeSeq: earliest, maxMessages: 100 },
-              controller.signal,
+        let stopAfterFrame = false;
+        if (frame.type === 'snapshot') {
+          const snapRecords = Array.isArray(frame.records) ? frame.records : [];
+          if (since > 0) {
+            const filtered = snapRecords.filter(
+              (record: any) => typeof record?.event?.seq !== 'number' || record.event.seq > since,
             );
-            this.assertAllowed(sessionId);
-            const olderRecords = Array.isArray(older.records)
-              ? older.records.filter(
+            const seqs = snapRecords
+              .map((record: any) => record?.event?.seq)
+              .filter((seq: unknown): seq is number => typeof seq === 'number');
+            let earliest = seqs.length > 0 ? Math.min(...seqs) : undefined;
+            const collectedOlder: unknown[] = [];
+            let incompleteGap = false;
+            if (earliest !== undefined && earliest > since + 1) {
+              let beforeSeq: number | undefined = earliest;
+              let pages = 0;
+              while (beforeSeq !== undefined && beforeSeq > since + 1 && pages < 50) {
+                pages++;
+                const older = await this.sessions.events(
+                  { address: { kind: 'session', sessionId }, beforeSeq, maxMessages: 100 },
+                  controller.signal,
+                );
+                this.assertAllowed(sessionId);
+                const pageRecords = Array.isArray(older.records) ? older.records : [];
+                const relevant = pageRecords.filter(
                   (record: any) =>
-                    typeof record?.event?.seq === 'number' && record.event.seq > since && record.event.seq < earliest,
-                )
-              : [];
-            backfilled = [...olderRecords, ...filtered];
+                    typeof record?.event?.seq === 'number' && record.event.seq > since && record.event.seq < beforeSeq!,
+                );
+                collectedOlder.unshift(...relevant);
+                const pageSeqs = pageRecords
+                  .map((record: any) => record?.event?.seq)
+                  .filter((seq: unknown): seq is number => typeof seq === 'number');
+                const minPageSeq = pageSeqs.length > 0 ? Math.min(...pageSeqs) : undefined;
+                if (!older.hasMore || minPageSeq === undefined || minPageSeq <= since + 1) {
+                  earliest = minPageSeq ?? earliest;
+                  break;
+                }
+                if (minPageSeq >= beforeSeq) {
+                  incompleteGap = true;
+                  break;
+                }
+                beforeSeq = minPageSeq;
+                earliest = minPageSeq;
+                if (pages === 50) incompleteGap = true;
+              }
+            }
+            const combined = [...collectedOlder, ...filtered];
+            const limit = this.config.maxEventBytes ?? 1_000_000;
+            if (incompleteGap) {
+              projected = { ...frame, records: [], hasMore: true };
+              stopAfterFrame = true;
+            } else {
+              const fitted: unknown[] = [];
+              let fittedBytes = 0;
+              let truncated = false;
+              for (const rec of combined) {
+                const safeRec = redact(rec);
+                const recSize = JSON.stringify(safeRec).length;
+                if (fitted.length > 0 && bytes + fittedBytes + recSize > limit) {
+                  truncated = true;
+                  break;
+                }
+                fitted.push(safeRec);
+                fittedBytes += recSize;
+                const recSeq = (rec as { event?: { seq?: number } })?.event?.seq;
+                if (typeof recSeq === 'number') cursor = Math.max(cursor, recSeq);
+              }
+              if (!truncated && typeof frame.cursor === 'number') {
+                cursor = Math.max(cursor, frame.cursor);
+              }
+              projected = { ...frame, records: fitted, ...(truncated ? { hasMore: true } : {}) };
+              if (truncated) stopAfterFrame = true;
+            }
+          } else if (typeof frame.cursor === 'number') {
+            cursor = Math.max(cursor, frame.cursor);
           }
-          projected = { ...frame, records: backfilled };
         }
         const safe = redact(projected);
         bytes += JSON.stringify(safe).length;
         frames.push(safe);
-        if (controller.signal.aborted || bytes >= (this.config.maxEventBytes ?? 1_000_000)) break;
+        if (stopAfterFrame || controller.signal.aborted || bytes >= (this.config.maxEventBytes ?? 1_000_000)) break;
         if (frame.type === 'event' && timeoutMs > 0) break;
       }
     } catch (error) {

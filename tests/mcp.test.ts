@@ -177,19 +177,31 @@ describe('read-only MCP endpoint', () => {
     expect(JSON.stringify(batchReplies)).not.toContain('secret after revoke');
   });
 
-  it('backfills missed records when watch since cursor falls behind the snapshot window', async () => {
+  it('backfills multi-page missed records (hasMore: true) and bounds cursor when truncated by maxEventBytes', async () => {
     const gappedSessions: SessionControllerLike = {
       ...sessions,
       async events(request) {
-        expect(request.beforeSeq).toBe(10);
-        return {
-          records: [
-            { type: 'event', event: { type: 'assistant/message', seq: 5, data: { text: 'missed-5' } } },
-            { type: 'event', event: { type: 'assistant/message', seq: 8, data: { text: 'missed-8' } } },
-          ],
-          hasMore: false,
-          address: request.address,
-        };
+        if (request.beforeSeq === 10) {
+          return {
+            records: [
+              { type: 'event', event: { type: 'assistant/message', seq: 7, data: { text: 'missed-7' } } },
+              { type: 'event', event: { type: 'assistant/message', seq: 9, data: { text: 'missed-9' } } },
+            ],
+            hasMore: true,
+            address: request.address,
+          };
+        }
+        if (request.beforeSeq === 7) {
+          return {
+            records: [
+              { type: 'event', event: { type: 'assistant/message', seq: 4, data: { text: 'missed-4' } } },
+              { type: 'event', event: { type: 'assistant/message', seq: 6, data: { text: 'missed-6' } } },
+            ],
+            hasMore: false,
+            address: request.address,
+          };
+        }
+        return { records: [], hasMore: false, address: request.address };
       },
       async *follow() {
         yield {
@@ -207,7 +219,27 @@ describe('read-only MCP endpoint', () => {
       name: 'dsh_session_watch',
       arguments: { sessionId: 'shared', since: 3, timeoutMs: 1_000 },
     });
-    const records = watched.result.structuredContent.frames[0].records;
-    expect(records.map((r: any) => r.event.seq)).toEqual([5, 8, 10]);
+    const full = watched.result.structuredContent;
+    expect(full.frames[0].records.map((r: any) => r.event.seq)).toEqual([4, 6, 7, 9, 10]);
+    expect(full.cursor).toBe(10);
+
+    // When maxEventBytes truncates mid-backfill, cursor stops at the last returned record seq (not 10)
+    await server.close();
+    server = new McpServer(
+      { port: 0, token: 'test-token', allowSessions: ['shared'], maxEventBytes: 180 },
+      gappedSessions,
+    );
+    const addr2 = await server.start();
+    base = `http://${addr2.host}:${addr2.port}/mcp`;
+    const truncated = await rpc('tools/call', {
+      name: 'dsh_session_watch',
+      arguments: { sessionId: 'shared', since: 3, timeoutMs: 1_000 },
+    });
+    const part = truncated.result.structuredContent;
+    const seqs = part.frames[0].records.map((r: any) => r.event.seq);
+    expect(seqs.length).toBeGreaterThan(0);
+    expect(seqs.length).toBeLessThan(5);
+    expect(part.cursor).toBe(seqs.at(-1));
+    expect(part.frames[0].hasMore).toBe(true);
   });
 });
