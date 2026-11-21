@@ -327,7 +327,13 @@ export class McpServer {
             const combined = [...collectedOlder, ...filtered];
             const limit = this.config.maxEventBytes ?? 1_000_000;
             if (incompleteGap) {
-              projected = { ...frame, records: [], hasMore: true };
+              projected = {
+                ...frame,
+                records: [],
+                hasMore: true,
+                gapDetected: true,
+                ...(earliest !== undefined ? { nextBeforeSeq: earliest } : {}),
+              };
               stopAfterFrame = true;
             } else {
               const fitted: unknown[] = [];

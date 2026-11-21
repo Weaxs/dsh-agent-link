@@ -211,56 +211,57 @@ export function registerWebRoutes(
       try {
         const body = await parseBody(request);
         const id = typeof body.id === 'string' ? body.id.trim() : '';
-        const existing = id ? manager.getConfig(id) : undefined;
-        const incomingToken = typeof body.token === 'string' ? body.token.trim() : '';
-        const clearToken = body.clearToken === true;
-        const kind = (body.kind ?? existing?.kind) as AgentConfig['kind'];
-        const transport = ((body.transport ?? existing?.transport) as AgentConfig['transport']) ?? 'ssh';
-        const resolvedToken = clearToken ? undefined : incomingToken || existing?.token;
-        const resolvedTls = typeof body.tls === 'boolean' ? body.tls : existing?.tls;
-        const acpTransport =
-          kind === 'acp'
-            ? body.acpTransport === 'stdio' || body.acpTransport === 'websocket'
-              ? body.acpTransport
-              : existing?.acpTransport
-            : undefined;
-        const acpCommand =
-          kind === 'acp' && acpTransport === 'stdio'
-            ? typeof body.acpCommand === 'string'
-              ? body.acpCommand.trim() || undefined
-              : existing?.acpCommand
-            : undefined;
-        const candidate: AgentConfig = {
-          ...(existing ?? {}),
-          id,
-          kind,
-          transport,
-          ssh:
-            transport === 'ssh'
-              ? typeof body.ssh === 'string'
-                ? body.ssh.trim() || undefined
-                : existing?.ssh
-              : undefined,
-          host:
-            transport !== 'ssh'
-              ? typeof body.host === 'string'
-                ? body.host.trim() || undefined
-                : existing?.host
-              : undefined,
-          port: body.port !== undefined && body.port !== '' ? Number(body.port) : undefined,
-          tls: transport === 'direct' && resolvedTls ? true : undefined,
-          token: resolvedToken,
-          tokenEnv: clearToken ? undefined : existing?.tokenEnv,
-          model: typeof body.model === 'string' ? body.model.trim() || undefined : existing?.model,
-          acpTransport,
-          acpCommand,
-          ...(Array.isArray(body.acpArgs) ? { acpArgs: body.acpArgs.map(String) } : {}),
-        };
-        for (const key of Object.keys(candidate) as Array<keyof AgentConfig>) {
-          if (candidate[key] === undefined) delete candidate[key];
-        }
-        const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
-        await withAgentRouteLock(normalized!.id, async () => {
+        if (!id) return errorReply('id is required', 400);
+        await withAgentRouteLock(id, async () => {
+          const existing = manager.getConfig(id);
+          const incomingToken = typeof body.token === 'string' ? body.token.trim() : '';
+          const clearToken = body.clearToken === true;
+          const kind = (body.kind ?? existing?.kind) as AgentConfig['kind'];
+          const transport = ((body.transport ?? existing?.transport) as AgentConfig['transport']) ?? 'ssh';
+          const resolvedToken = clearToken ? undefined : incomingToken || existing?.token;
+          const resolvedTls = typeof body.tls === 'boolean' ? body.tls : existing?.tls;
+          const acpTransport =
+            kind === 'acp'
+              ? body.acpTransport === 'stdio' || body.acpTransport === 'websocket'
+                ? body.acpTransport
+                : existing?.acpTransport
+              : undefined;
+          const acpCommand =
+            kind === 'acp' && acpTransport === 'stdio'
+              ? typeof body.acpCommand === 'string'
+                ? body.acpCommand.trim() || undefined
+                : existing?.acpCommand
+              : undefined;
+          const candidate: AgentConfig = {
+            ...(existing ?? {}),
+            id,
+            kind,
+            transport,
+            ssh:
+              transport === 'ssh'
+                ? typeof body.ssh === 'string'
+                  ? body.ssh.trim() || undefined
+                  : existing?.ssh
+                : undefined,
+            host:
+              transport !== 'ssh'
+                ? typeof body.host === 'string'
+                  ? body.host.trim() || undefined
+                  : existing?.host
+                : undefined,
+            port: body.port !== undefined && body.port !== '' ? Number(body.port) : undefined,
+            tls: transport === 'direct' && resolvedTls ? true : undefined,
+            token: resolvedToken,
+            tokenEnv: clearToken ? undefined : existing?.tokenEnv,
+            model: typeof body.model === 'string' ? body.model.trim() || undefined : existing?.model,
+            acpTransport,
+            acpCommand,
+            ...(Array.isArray(body.acpArgs) ? { acpArgs: body.acpArgs.map(String) } : {}),
+          };
+          for (const key of Object.keys(candidate) as Array<keyof AgentConfig>) {
+            if (candidate[key] === undefined) delete candidate[key];
+          }
+          const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
           await manager.upsert(normalized!);
           updateStoredState((state) => ({
             ...state,
