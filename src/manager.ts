@@ -92,6 +92,13 @@ export class AgentManager {
     const config = this.configs.find((item) => item.id === agentId)!;
     const remoteSession =
       sessionId ?? (adapter.kind === 'acp' || adapter.kind === 'dsh' ? undefined : createNativeSessionId(config));
+    if (adapter.kind === 'acp' && remoteSession) {
+      const existingId = this.latestSessionJob.get(sessionKey(agentId, remoteSession));
+      const existingJob = existingId ? this.jobs.get(existingId) : undefined;
+      if (existingJob && (existingJob.status === 'queued' || existingJob.status === 'running')) {
+        throw new Error(`ACP session "${remoteSession}" already has an active job (${existingJob.id})`);
+      }
+    }
     const id = randomUUID();
     const job: AgentJob = {
       id,

@@ -180,4 +180,40 @@ describe('AgentManager', () => {
     expect(adapter.cancelled).toBe(true);
     expect(() => manager.start('missing', 'x', undefined)).toThrow(/Unknown agent/);
   });
+
+  it('rejects an overlapping ACP job before overwriting session ownership so the active job remains cancellable', async () => {
+    let cancelledSession: string | undefined;
+    const acpConfig: AgentConfig = { id: 'acp-remote', kind: 'acp', transport: 'local' };
+    class HangingAcpAdapter implements AgentAdapter {
+      readonly kind = 'acp' as const;
+      constructor(readonly id: string) {}
+      async health() {
+        return { ok: true };
+      }
+      async listSessions() {
+        return [];
+      }
+      async *prompt(session: string | undefined, _text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+        const sid = session ?? 'acp-sess-1';
+        yield { type: 'text', text: '', sessionId: sid };
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      async cancel(session: string) {
+        cancelledSession = session;
+      }
+      async close() {}
+    }
+    const manager = new AgentManager([acpConfig], 10_000, () => new HangingAcpAdapter('acp-remote'));
+    const first = manager.start('acp-remote', 'turn 1', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(first.sessionId).toBe('acp-sess-1');
+    expect(() => manager.start('acp-remote', 'turn 2', 'acp-sess-1')).toThrow(/already has an active job/);
+    const cancelled = await manager.cancel(first.id);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelledSession).toBe('acp-sess-1');
+    await manager.wait(first.id);
+  });
 });
