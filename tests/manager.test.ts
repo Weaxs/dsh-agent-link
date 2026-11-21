@@ -43,6 +43,7 @@ describe('AgentManager', () => {
     expect(completed.text).toBe('part done');
     expect(notified).toBe(true);
     await expect(manager.respond(job.id, 'once', undefined, 'wrong-request')).rejects.toThrow(/no longer pending/);
+    await expect(manager.respond(job.id, 'bogus-choice', undefined, 'r1')).rejects.toThrow(/Invalid approval choice/);
     await manager.respond(job.id, 'once', undefined, 'r1');
     expect(manager.get(job.id).pendingApproval).toBeUndefined();
   });

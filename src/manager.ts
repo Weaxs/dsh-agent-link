@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AcpAdapter } from './adapters/acp.js';
 import { createNativeAdapter, createNativeSessionId } from './adapters/native.js';
-import { secret } from './config.js';
+import { LocalOnlyAbortError, secret } from './config.js';
 import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.js';
 
 export type AdapterFactory = (config: AgentConfig) => AgentAdapter;
@@ -62,7 +62,11 @@ export class AgentManager {
   async upsert(config: AgentConfig): Promise<void> {
     const existing = this.adapters.get(config.id);
     await this.abortJobsForAgent(config.id, existing);
-    if (existing) await existing.close().catch(() => {});
+    if (existing) {
+      await existing.close().catch(() => {
+        /* best-effort cleanup of replaced adapter */
+      });
+    }
     const index = this.configs.findIndex((item) => item.id === config.id);
     if (index >= 0) this.configs[index] = config;
     else this.configs.push(config);
@@ -76,7 +80,9 @@ export class AgentManager {
     this.adapters.delete(id);
     const index = this.configs.findIndex((item) => item.id === id);
     if (index >= 0) this.configs.splice(index, 1);
-    await existing.close().catch(() => {});
+    await existing.close().catch(() => {
+      /* best-effort cleanup of removed adapter */
+    });
     return true;
   }
 
@@ -192,6 +198,11 @@ export class AgentManager {
         `Approval request "${expectedRequestId}" is no longer pending on job ${id} (current: "${pending.requestId}")`,
       );
     }
+    if (pending.choices.length > 0 && !pending.choices.includes(choice)) {
+      throw new Error(
+        `Invalid approval choice "${choice}" for job ${id}; expected one of: ${pending.choices.join(', ')}`,
+      );
+    }
     const adapter = this.adapter(job.agentId);
     if (!adapter.respond) throw new Error(`${job.agentId} does not support approval responses through this adapter`);
     await adapter.respond(job.sessionId!, pending.requestId, choice, signal);
@@ -220,10 +231,7 @@ export class AgentManager {
       job.status = 'cancelled';
       delete job.pendingApproval;
       job.updatedAt = Date.now();
-      const reason = Object.assign(new Error(`agent "${agentId}" reconfigured`), {
-        skipRemoteCancel: true,
-      });
-      this.controllers.get(id)?.abort(reason);
+      this.controllers.get(id)?.abort(new LocalOnlyAbortError(`agent "${agentId}" reconfigured`));
       if (owned && adapter && job.sessionId) {
         remoteCancels.push(
           adapter
@@ -231,7 +239,9 @@ export class AgentManager {
             .then(() => {
               this.remoteCancelled.add(id);
             })
-            .catch(() => {}),
+            .catch(() => {
+              /* best-effort remote cancel during reconfigure; retry stays enabled because remoteCancelled is unset */
+            }),
         );
       }
     }
@@ -267,15 +277,15 @@ export class AgentManager {
     this.controllers.set(job.id, controller);
     const timer = setTimeout(() => {
       const owned = this.isLatestSessionJob(job);
-      const reason = Object.assign(new Error(`job timed out after ${this.timeoutMs}ms`), {
-        skipRemoteCancel: !owned,
-      });
-      controller.abort(reason);
+      const message = `job timed out after ${this.timeoutMs}ms`;
+      controller.abort(owned ? new Error(message) : new LocalOnlyAbortError(message));
       if (owned && job.sessionId) {
         adapter
           .cancel(job.sessionId)
           .then(() => this.remoteCancelled.add(job.id))
-          .catch(() => {});
+          .catch(() => {
+            /* best-effort timeout cancel; retry stays enabled because remoteCancelled is unset */
+          });
       }
     }, this.timeoutMs);
     job.status = 'running';

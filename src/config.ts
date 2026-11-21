@@ -79,3 +79,28 @@ export function secret(agent: AgentConfig, env: NodeJS.ProcessEnv = process.env)
           : 'HERMES_API_KEY';
   return agent.token ?? env[agent.tokenEnv ?? fallback];
 }
+
+export class LocalOnlyAbortError extends Error {
+  readonly skipRemoteCancel = true;
+}
+
+export function shouldSkipRemoteCancel(signal?: AbortSignal): boolean {
+  return Boolean((signal?.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel);
+}
+
+export async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw signal.reason ?? new Error('request aborted');
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(signal.reason ?? new Error('request aborted'));
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}

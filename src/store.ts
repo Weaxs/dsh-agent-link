@@ -54,12 +54,3 @@ export function saveStoredState(state: StoredKnotState, file = defaultAgentsFile
   renameSync(temp, file);
   return normalized;
 }
-
-export function loadStoredAgents(file = defaultAgentsFile()): AgentConfig[] {
-  return loadStoredState(file).agents;
-}
-
-export function saveStoredAgents(agents: AgentConfig[], file = defaultAgentsFile()): AgentConfig[] {
-  const current = loadStoredState(file);
-  return saveStoredState({ ...current, agents }, file).agents;
-}

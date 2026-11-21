@@ -15,7 +15,7 @@ import {
 import { createWebSocketStream, type WebSocketConstructor } from '@agentclientprotocol/sdk/experimental/ws-client';
 import WebSocket from 'ws';
 import { AsyncQueue } from '../async-queue.js';
-import { secret } from '../config.js';
+import { raceAbort, secret, shouldSkipRemoteCancel } from '../config.js';
 import { transportFor } from '../transports/http.js';
 import { shellQuote, sshBaseArguments } from '../transports/stdio-socket.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
@@ -118,7 +118,9 @@ export class AcpAdapter implements AgentAdapter {
             );
           }
           if (!this.sessionCwds.has(sessionId) && this.capabilities?.sessionCapabilities?.list) {
-            await this.listSessions(signal, sessionId).catch(() => {});
+            await this.listSessions(signal, sessionId).catch(() => {
+              /* best-effort cwd discovery before resume/load; fall back to configured dshCwd or '/' */
+            });
           }
           const cwd = this.sessionCwds.get(sessionId) ?? this.config.dshCwd ?? '/';
           if (canResume) {
@@ -212,8 +214,10 @@ export class AcpAdapter implements AgentAdapter {
       }
     } catch (error) {
       if (signal?.aborted) {
-        if (actualId && !(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
-          await this.cancel(actualId).catch(() => {});
+        if (actualId && !shouldSkipRemoteCancel(signal)) {
+          await this.cancel(actualId).catch(() => {
+            /* best-effort remote cancel on abort */
+          });
         }
         yield { type: 'final', text: output, stopReason: 'cancelled', ...(actualId ? { sessionId: actualId } : {}) };
       } else {
@@ -347,21 +351,22 @@ export class AcpAdapter implements AgentAdapter {
 
   private async connect(signal?: AbortSignal): Promise<void> {
     if (this.connection && !this.connection.signal.aborted) return;
-    if (this.connecting) return this.connecting;
-    this.connecting = this.open(signal)
-      .catch(async (error) => {
-        this.connection?.close();
-        this.connection = undefined;
-        await this.closeProcess();
-        throw error;
-      })
-      .finally(() => {
-        this.connecting = undefined;
-      });
-    return this.connecting;
+    if (!this.connecting) {
+      this.connecting = this.open()
+        .catch(async (error) => {
+          this.connection?.close();
+          this.connection = undefined;
+          await this.closeProcess();
+          throw error;
+        })
+        .finally(() => {
+          this.connecting = undefined;
+        });
+    }
+    return raceAbort(this.connecting, signal);
   }
 
-  private async open(signal?: AbortSignal): Promise<void> {
+  private async open(): Promise<void> {
     this.clearSessions();
     await this.closeProcess();
     const stream = this.config.acpTransport === 'stdio' ? this.openStdio() : this.openWebSocket();
@@ -373,6 +378,12 @@ export class AcpAdapter implements AgentAdapter {
     });
     app.onRequest(methods.client.session.requestPermission, ({ params }) => {
       const requestId = params.toolCall.toolCallId;
+      const key = permissionKey(params.sessionId, requestId);
+      const previous = this.permissions.get(key);
+      if (previous) {
+        previous.resolve({ outcome: { outcome: 'cancelled' } });
+        this.permissions.delete(key);
+      }
       this.queues.get(params.sessionId)?.push({
         kind: 'native',
         value: {
@@ -383,7 +394,7 @@ export class AcpAdapter implements AgentAdapter {
         },
       });
       return new Promise<RequestPermissionResponse>((resolve) => {
-        this.permissions.set(permissionKey(params.sessionId, requestId), { sessionId: params.sessionId, resolve });
+        this.permissions.set(key, { sessionId: params.sessionId, resolve });
       });
     });
     const connection = app.connect(stream);
@@ -404,7 +415,6 @@ export class AcpAdapter implements AgentAdapter {
       }),
       this.config.connectTimeoutMs ?? 30_000,
       'ACP initialize',
-      signal,
     );
     this.capabilities = initialized.agentCapabilities;
   }

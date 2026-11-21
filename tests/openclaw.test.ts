@@ -26,6 +26,13 @@ class FakeGateway {
       value: { type: 'event', event: 'agent', payload: { runId: 'run-1', type: 'message.delta', delta: 'ok' } },
     };
   }
+  subscribeEvents() {
+    return {
+      next: () => this.nextEvent(),
+      error: () => undefined,
+      unsubscribe: () => {},
+    };
+  }
   async request(method: string, params: any) {
     this.calls.push({ method, params });
     if (method === 'connect') return { type: 'hello-ok' };

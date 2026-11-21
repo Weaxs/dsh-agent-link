@@ -320,6 +320,10 @@ async function apiPost<T>(ctx: ClientContext, path: string, body: Record<string,
   return payload.value as T;
 }
 
+function defaultPortForKind(kind: AgentFormState['kind']): string {
+  return kind === 'openclaw' ? '18789' : kind === 'dsh' ? '18790' : kind === 'acp' ? '18792' : '8642';
+}
+
 function makeDashboard(React: ReactModule, ctx: ClientContext) {
   const h = React.createElement;
 
@@ -1064,14 +1068,12 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                         value: form.kind,
                         onChange: (e: { target: { value: string } }) => {
                           const nextKind = e.target.value as AgentFormState['kind'];
-                          const defaultPort = (k: AgentFormState['kind']) =>
-                            k === 'openclaw' ? '18789' : k === 'dsh' ? '18790' : k === 'acp' ? '18792' : '8642';
                           setForm((cur) =>
                             cur
                               ? {
                                   ...cur,
                                   kind: nextKind,
-                                  port: cur.port === defaultPort(cur.kind) ? '' : cur.port,
+                                  port: cur.port === defaultPortForKind(cur.kind) ? '' : cur.port,
                                 }
                               : null,
                           );
@@ -1113,14 +1115,7 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                     h('input', {
                       className: 'dk-input dk-mono',
                       type: 'number',
-                      placeholder:
-                        form.kind === 'openclaw'
-                          ? '18789'
-                          : form.kind === 'dsh'
-                            ? '18790'
-                            : form.kind === 'acp'
-                              ? '18792'
-                              : '8642',
+                      placeholder: defaultPortForKind(form.kind),
                       value: form.port,
                       onInput: (e: { target: { value: string } }) =>
                         setForm((cur) => (cur ? { ...cur, port: e.target.value } : null)),

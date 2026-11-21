@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { secret } from '../config.js';
+import { raceAbort, secret, shouldSkipRemoteCancel } from '../config.js';
 import { transportFor } from '../transports/http.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, Transport } from '../types.js';
 import { VERSION } from '../version.js';
@@ -24,13 +24,13 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async health(signal?: AbortSignal): Promise<Record<string, unknown>> {
-    await abortable(this.connect(), signal);
-    return this.gateway.request('health', {}, remaining(15_000, signal));
+    await raceAbort(this.connect(), signal);
+    return this.gateway.request('health', {}, remaining(15_000, signal), signal);
   }
 
   async listSessions(signal?: AbortSignal): Promise<AgentSession[]> {
-    await abortable(this.connect(), signal);
-    const value = await this.gateway.request('sessions.list', {}, remaining(30_000, signal));
+    await raceAbort(this.connect(), signal);
+    const value = await this.gateway.request('sessions.list', {}, remaining(30_000, signal), signal);
     const rows = Array.isArray(value) ? value : (value.items ?? value.sessions ?? []);
     return (Array.isArray(rows) ? rows : [])
       .map((row: Record<string, any>) => ({
@@ -44,15 +44,8 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
-    await abortable(this.connect(), signal);
-    const subscription =
-      typeof this.gateway.subscribeEvents === 'function'
-        ? this.gateway.subscribeEvents()
-        : {
-            next: (sig?: AbortSignal) => this.gateway.nextEvent(sig),
-            error: () => undefined,
-            unsubscribe: () => {},
-          };
+    await raceAbort(this.connect(), signal);
+    const subscription = this.gateway.subscribeEvents();
     const waitAbort = new AbortController();
     const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
     if (signal?.aborted) onAbort();
@@ -68,6 +61,7 @@ export class OpenClawAdapter implements AgentAdapter {
             idempotencyKey: randomUUID(),
           },
           remaining(60_000, signal),
+          signal,
         );
       }
       const started = await this.gateway.request(
@@ -79,6 +73,7 @@ export class OpenClawAdapter implements AgentAdapter {
           idempotencyKey: randomUUID(),
         },
         remaining(60_000, signal),
+        signal,
       );
       const runId = String(started.runId ?? started.run_id ?? started.id ?? '');
       const sessionKey = String(started.sessionKey ?? started.session_key ?? sessionId ?? '');
@@ -93,8 +88,10 @@ export class OpenClawAdapter implements AgentAdapter {
       next.catch(() => {});
       while (true) {
         if (signal?.aborted) {
-          if (!(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
-            await this.cancel(sessionKey).catch(() => {});
+          if (!shouldSkipRemoteCancel(signal)) {
+            await this.cancel(sessionKey).catch(() => {
+              /* best-effort remote cancel on abort */
+            });
           }
           return;
         }
@@ -104,8 +101,10 @@ export class OpenClawAdapter implements AgentAdapter {
           aborted,
         ]);
         if (result.kind === 'aborted') {
-          if (!(signal?.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
-            await this.cancel(sessionKey).catch(() => {});
+          if (!shouldSkipRemoteCancel(signal)) {
+            await this.cancel(sessionKey).catch(() => {
+              /* best-effort remote cancel on abort */
+            });
           }
           return;
         }
@@ -176,8 +175,8 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async cancel(sessionId: string, signal?: AbortSignal): Promise<void> {
-    await abortable(this.connect(), signal);
-    await this.gateway.request('sessions.abort', { key: sessionId }, remaining(30_000, signal));
+    await raceAbort(this.connect(), signal);
+    await this.gateway.request('sessions.abort', { key: sessionId }, remaining(30_000, signal), signal);
   }
 
   async close(): Promise<void> {
@@ -276,22 +275,5 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
     ]);
   } finally {
     if (timer) clearTimeout(timer);
-  }
-}
-
-async function abortable(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
-  if (!signal) return promise;
-  if (signal.aborted) throw new Error('request aborted');
-  let onAbort: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        onAbort = () => reject(new Error('request aborted'));
-        signal.addEventListener('abort', onAbort, { once: true });
-      }),
-    ]);
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }

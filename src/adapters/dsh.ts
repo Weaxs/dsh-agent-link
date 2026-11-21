@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { secret } from '../config.js';
+import { raceAbort, secret, shouldSkipRemoteCancel } from '../config.js';
 import { transportFor } from '../transports/http.js';
 import type { AgentAdapter, AgentConfig, AgentEvent, AgentSession, HttpResponse, Transport } from '../types.js';
 
@@ -134,7 +134,8 @@ export class DshAdapter implements AgentAdapter {
             if (delta) yield { type: 'text', text: delta, sessionId: actualId };
           }
         }
-        const cursor = Number(waited.state?.cursor ?? afterSeq);
+        const parsedCursor = Number(waited.state?.cursor);
+        const cursor = Number.isFinite(parsedCursor) ? parsedCursor : afterSeq;
         rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));
         if (records.length === 0 && waited.reason !== 'timeout') {
           const page = await this.rpc(
@@ -160,8 +161,10 @@ export class DshAdapter implements AgentAdapter {
       }
     } catch (error) {
       if (signal?.aborted) {
-        if (!(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
-          await this.cancel(actualId).catch(() => {});
+        if (!shouldSkipRemoteCancel(signal)) {
+          await this.cancel(actualId).catch(() => {
+            /* best-effort remote cancel on abort */
+          });
         }
         yield { type: 'final', text: output, stopReason: 'cancelled', sessionId: actualId };
         return;
@@ -180,24 +183,24 @@ export class DshAdapter implements AgentAdapter {
 
   private async connect(signal?: AbortSignal): Promise<void> {
     if (this.cookie) return;
-    if (this.connecting) return this.connecting;
-    this.connecting = (async () => {
-      const token = secret(this.config);
-      if (!token) throw new Error(`${this.id}: a dsh web launch token is required (token or tokenEnv)`);
-      const response = await this.transport.request({
-        path: `/connect?token=${encodeURIComponent(token)}&interactions=none`,
-        signal,
+    if (!this.connecting) {
+      this.connecting = (async () => {
+        const token = secret(this.config);
+        if (!token) throw new Error(`${this.id}: a dsh web launch token is required (token or tokenEnv)`);
+        const response = await this.transport.request({
+          path: `/connect?token=${encodeURIComponent(token)}&interactions=none`,
+        });
+        if (response.status !== 302) throw new Error(`DSH /connect returned HTTP ${response.status}: ${response.text}`);
+        const header = response.headers['set-cookie'];
+        const cookie = Array.isArray(header) ? header[0] : header;
+        const pair = cookie?.split(';', 1)[0]?.trim();
+        if (!pair) throw new Error('DSH /connect did not return an API cookie');
+        this.cookie = pair;
+      })().finally(() => {
+        this.connecting = undefined;
       });
-      if (response.status !== 302) throw new Error(`DSH /connect returned HTTP ${response.status}: ${response.text}`);
-      const header = response.headers['set-cookie'];
-      const cookie = Array.isArray(header) ? header[0] : header;
-      const pair = cookie?.split(';', 1)[0]?.trim();
-      if (!pair) throw new Error('DSH /connect did not return an API cookie');
-      this.cookie = pair;
-    })().finally(() => {
-      this.connecting = undefined;
-    });
-    return this.connecting;
+    }
+    return raceAbort(this.connecting, signal);
   }
 
   private async rpc(

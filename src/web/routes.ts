@@ -40,12 +40,18 @@ function errorReply(message: string, status = 400): Response {
 }
 
 async function parseBody(request: Request): Promise<Record<string, unknown>> {
+  const raw = await request.text();
+  if (!raw.trim()) return {};
+  let parsed: unknown;
   try {
-    const parsed = await request.json();
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+    parsed = JSON.parse(raw);
   } catch {
-    return {};
+    throw new Error('Request body must be valid JSON');
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Request body must be a JSON object');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export function registerWebRoutes(
@@ -105,7 +111,7 @@ export function registerWebRoutes(
           value: {
             version: VERSION,
             agents: manager.list(),
-            jobs: manager.listJobs().slice(0, 50),
+            jobs: redact(manager.listJobs().slice(0, 50)),
             mcp: {
               enabled: Boolean(mcp?.address),
               address: mcp?.address ?? null,
@@ -138,7 +144,7 @@ export function registerWebRoutes(
         const choice = typeof body.choice === 'string' ? body.choice : '';
         if (!jobId || !requestId || !choice) return errorReply('jobId, requestId, and choice are required', 400);
         const job = await manager.respond(jobId, choice, request.signal, requestId);
-        return jsonReply({ ok: true, value: job });
+        return jsonReply({ ok: true, value: redact(job) });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
       }
@@ -150,7 +156,7 @@ export function registerWebRoutes(
         const jobId = typeof body.jobId === 'string' ? body.jobId : '';
         if (!jobId) return errorReply('jobId is required', 400);
         const job = await manager.cancel(jobId, request.signal);
-        return jsonReply({ ok: true, value: job });
+        return jsonReply({ ok: true, value: redact(job) });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
       }
@@ -228,6 +234,7 @@ export function registerWebRoutes(
           port: body.port !== undefined && body.port !== '' ? Number(body.port) : undefined,
           tls: transport === 'direct' && resolvedTls ? true : undefined,
           token: resolvedToken,
+          tokenEnv: clearToken ? undefined : existing?.tokenEnv,
           model: typeof body.model === 'string' ? body.model.trim() || undefined : existing?.model,
           acpTransport,
           acpCommand,
@@ -241,8 +248,8 @@ export function registerWebRoutes(
         const agents = state.agents.filter((item) => item.id !== normalized!.id);
         agents.push(normalized!);
         const deletedIds = state.deletedIds.filter((item) => item !== normalized!.id);
-        saveStoredState({ ...state, agents, deletedIds });
         await manager.upsert(normalized!);
+        saveStoredState({ ...state, agents, deletedIds });
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
@@ -257,8 +264,8 @@ export function registerWebRoutes(
         const state = loadStoredState();
         const agents = state.agents.filter((item) => item.id !== id);
         const deletedIds = [...new Set([...state.deletedIds, id])];
-        saveStoredState({ ...state, agents, deletedIds });
         await manager.remove(id);
+        saveStoredState({ ...state, agents, deletedIds });
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
