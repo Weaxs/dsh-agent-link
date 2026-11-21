@@ -40,7 +40,7 @@
 
 ## Web UI Dashboard
 
-When loaded in `dsh web`, **dsh-knot** registers a native sidebar entry (**DSH Knot / 远端互联**) that matches DeepSeek Harness's horizontal workspace canvas without duplicating the main chat window:
+When loaded in `dsh web`, **dsh-knot** registers a native sidebar entry (**Remote Agents / 远端助手**) that matches DeepSeek Harness's horizontal workspace canvas without duplicating the main chat window:
 
 <p align="center">
   <img src="docs/assets/dashboard-preview.svg" alt="DSH Knot Web UI inside DeepSeek Harness" width="100%" />
@@ -90,7 +90,7 @@ Then add the absolute repository directory through **Plugins → Add plugin** an
 
 You can configure as many agents as you need directly from the **DSH Knot Web UI** (or **`Settings → Plugins → DSH Knot`**), with each agent storing its own endpoint and token independently:
 
-1. Open **DSH Knot / 远端互联** in the left sidebar of `dsh web`.
+1. Open **Remote Agents / 远端助手** in the left sidebar of `dsh web`.
 2. Click **`+ Add Agent` / `+ 添加助手`**.
 3. Choose the protocol (**ACP v1**, **Hermes**, **OpenClaw**, or **Remote DSH**), transport (**SSH**, **Direct / Tailscale**, or **Local**), host/SSH alias, and paste that agent's token directly into the password field.
 4. Click **Save** — the agent is activated immediately and persisted under `$DSH_HOME/knot/agents.json` with `0600` file permissions (tokens are never sent back to the browser).

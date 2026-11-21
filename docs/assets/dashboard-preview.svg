@@ -14,7 +14,7 @@
   <text x="105" y="102" text-anchor="middle" fill="#111827" font-family="-apple-system, sans-serif" font-size="12" font-weight="500">+ New Chat</text>
   <text x="26" y="144" fill="#52525B" font-family="-apple-system, sans-serif" font-size="12.5">Plugins</text>
   <rect x="14" y="158" width="182" height="32" rx="8" fill="#DCE4F7"/>
-  <text x="28" y="178" fill="#1E3A8A" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="600">DSH Knot</text>
+  <text x="28" y="178" fill="#1E3A8A" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="600">Remote Agents</text>
   <text x="26" y="214" fill="#52525B" font-family="-apple-system, sans-serif" font-size="12.5">Context Insight</text>
   <text x="26" y="244" fill="#94A3B8" font-family="ui-monospace, monospace" font-size="11">WORKSPACES</text>
   <text x="26" y="270" fill="#52525B" font-family="-apple-system, sans-serif" font-size="12">dsh-knot</text>
@@ -23,11 +23,11 @@
   <!-- Right Main Bento Canvas -->
   <g transform="translate(232, 22)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif">
     <!-- Top Header Bar -->
-    <text x="0" y="22" fill="#111827" font-size="16" font-weight="700">DSH Knot</text>
-    <rect x="92" y="4" width="142" height="26" rx="13" fill="#FFFFFF" stroke="#D8DCE6"/>
-    <text x="163" y="21" text-anchor="middle" fill="#4B5563" font-size="11.5">↻ Test all connections</text>
-    <rect x="244" y="4" width="168" height="26" rx="13" fill="#FFFFFF" stroke="#D8DCE6"/>
-    <text x="328" y="21" text-anchor="middle" fill="#15803D" font-family="ui-monospace, monospace" font-size="11">● MCP 127.0.0.1:19400</text>
+    <text x="0" y="22" fill="#111827" font-size="16" font-weight="700">Remote Agents</text>
+    <rect x="136" y="4" width="142" height="26" rx="13" fill="#FFFFFF" stroke="#D8DCE6"/>
+    <text x="207" y="21" text-anchor="middle" fill="#4B5563" font-size="11.5">↻ Test all connections</text>
+    <rect x="288" y="4" width="168" height="26" rx="13" fill="#FFFFFF" stroke="#D8DCE6"/>
+    <text x="372" y="21" text-anchor="middle" fill="#15803D" font-family="ui-monospace, monospace" font-size="11">● MCP 127.0.0.1:19400</text>
 
     <rect x="664" y="4" width="150" height="26" rx="8" fill="#E5E7EB"/>
     <rect x="667" y="7" width="48" height="20" rx="6" fill="#111827"/>

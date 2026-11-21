@@ -115,7 +115,7 @@ const STYLE_ID = 'dsh-knot-client-styles';
 
 const DICTS: Record<string, Record<string, string>> = {
   'zh-CN': {
-    title: '远端互联',
+    title: '远端助手',
     checkAll: '检测全部连接',
     checking: '检测中…',
     refresh: '刷新',
@@ -184,7 +184,7 @@ const DICTS: Record<string, Record<string, string>> = {
     noLocalSessions: '暂无可列出的本地会话',
   },
   en: {
-    title: 'DSH Knot',
+    title: 'Remote Agents',
     checkAll: 'Test all connections',
     checking: 'Testing…',
     refresh: 'Refresh',
@@ -255,6 +255,8 @@ const DICTS: Record<string, Record<string, string>> = {
 };
 
 const CSS = `
+.dk-sidebar-icon { color: #695777; }
+body[data-ds-dark-theme] .dk-sidebar-icon { color: #b6a1c4; }
 .dk-root { padding: 16px 20px; height: 100%; overflow-y: auto; box-sizing: border-box; background: var(--dsw-static-neutral-bluish-75, var(--dsw-alias-bg-layer-0, #f5f6f8)); color: var(--dsw-alias-label-primary, #111827); font-size: 13px; }
 body[data-ds-dark-theme] .dk-root { background: var(--dsw-alias-bg-layer-0, #0e1015); color: var(--dsw-alias-label-primary, #eef1f6); }
 .dk-wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
@@ -1289,17 +1291,21 @@ function makeIcon(React: ReactModule) {
     const size = typeof props.size === 'number' ? props.size : 16;
     return React.createElement(
       'svg',
-      { xmlns: 'http://www.w3.org/2000/svg', width: size, height: size, viewBox: '0 0 36 36' },
+      {
+        xmlns: 'http://www.w3.org/2000/svg',
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        className: 'dk-sidebar-icon',
+        'aria-hidden': true,
+      },
       React.createElement('path', {
-        d: 'M11.5 13.2 24.6 7.8M11.8 22.8l12.5 5.4',
+        d: 'M7.4 13.5H6a3 3 0 0 1-3-3v-2a3 3 0 0 1 3-3h5.5a3 3 0 0 1 3 3v2a3 3 0 0 1-2.9 3M12.4 10.5a3 3 0 0 0-2.9 3v2a3 3 0 0 0 3 3H18a3 3 0 0 0 3-3v-2a3 3 0 0 0-3-3h-1.4',
         fill: 'none',
         stroke: 'currentColor',
-        strokeWidth: '3',
+        strokeWidth: '1.75',
         strokeLinecap: 'round',
       }),
-      React.createElement('circle', { cx: 9, cy: 18, r: 5, fill: 'currentColor' }),
-      React.createElement('circle', { cx: 27, cy: 7, r: 4, fill: 'currentColor' }),
-      React.createElement('circle', { cx: 27, cy: 29, r: 4, fill: 'currentColor' }),
     );
   };
 }
