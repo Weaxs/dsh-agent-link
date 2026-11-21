@@ -56,26 +56,33 @@ export class AcpAdapter implements AgentAdapter {
     return { ok: true, protocol: 'acp', protocolVersion: PROTOCOL_VERSION, capabilities: this.capabilities };
   }
 
-  async listSessions(signal?: AbortSignal): Promise<AgentSession[]> {
+  async listSessions(signal?: AbortSignal, stopWhenId?: string): Promise<AgentSession[]> {
     await this.connect(signal);
     if (!this.capabilities?.sessionCapabilities?.list) return [];
-    const result = await this.connection!.agent.request(
-      methods.agent.session.list,
-      {},
-      {
+    const sessions: AgentSession[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 50; page++) {
+      const result = await this.connection!.agent.request(methods.agent.session.list, cursor ? { cursor } : {}, {
         cancellationSignal: signal,
         stopWaitingOnCancel: true,
-      },
-    );
-    return result.sessions.map((session) => {
-      if (session.cwd) this.rememberSessionCwd(session.sessionId, session.cwd);
-      return {
-        id: session.sessionId,
-        title: session.title ?? undefined,
-        ...(session.cwd ? { cwd: session.cwd } : {}),
-        updatedAt: session.updatedAt ?? undefined,
-      };
-    });
+      });
+      for (const session of result.sessions) {
+        if (session.cwd) this.rememberSessionCwd(session.sessionId, session.cwd);
+        sessions.push({
+          id: session.sessionId,
+          title: session.title ?? undefined,
+          ...(session.cwd ? { cwd: session.cwd } : {}),
+          updatedAt: session.updatedAt ?? undefined,
+        });
+      }
+      if (stopWhenId && this.sessionCwds.has(stopWhenId)) break;
+      const next = result.nextCursor ?? undefined;
+      if (!next || seenCursors.has(next)) break;
+      seenCursors.add(next);
+      cursor = next;
+    }
+    return sessions;
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
@@ -95,7 +102,7 @@ export class AcpAdapter implements AgentAdapter {
             );
           }
           if (!this.sessionCwds.has(sessionId) && this.capabilities?.sessionCapabilities?.list) {
-            await this.listSessions(signal).catch(() => {});
+            await this.listSessions(signal, sessionId).catch(() => {});
           }
           const cwd = this.sessionCwds.get(sessionId) ?? this.config.dshCwd ?? '/';
           if (canResume) {
@@ -181,7 +188,9 @@ export class AcpAdapter implements AgentAdapter {
       }
     } catch (error) {
       if (signal?.aborted) {
-        if (actualId) await this.cancel(actualId).catch(() => {});
+        if (actualId && !(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
+          await this.cancel(actualId).catch(() => {});
+        }
         yield { type: 'final', text: output, stopReason: 'cancelled', ...(actualId ? { sessionId: actualId } : {}) };
       } else {
         yield { type: 'error', text: error instanceof Error ? error.message : String(error) };

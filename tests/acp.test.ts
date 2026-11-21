@@ -213,4 +213,70 @@ describe('ACP provider and bridge', () => {
       `'/usr/local/bin/acp agent' '--flag' '$HOME;rm -rf /' 'it'\\''s'`,
     ]);
   });
+
+  it('paginates session/list via nextCursor to recover cwd for sessions on later pages', async () => {
+    const { Readable, Writable } = await import('node:stream');
+    const { agent, methods, ndJsonStream, PROTOCOL_VERSION } = await import('@agentclientprotocol/sdk');
+    const { WebSocketServer } = await import('ws');
+    const { AcpServer } = await import('@agentclientprotocol/sdk/experimental/server');
+    const { createNodeWebSocketUpgradeHandler } = await import('@agentclientprotocol/sdk/experimental/node');
+    const http = await import('node:http');
+    void Readable;
+    void Writable;
+    void ndJsonStream;
+
+    let resumedCwd: string | undefined;
+    const acpServer = new AcpServer({
+      createAgent: () => {
+        const app = agent({ name: 'paged-agent' });
+        app.onRequest(methods.agent.initialize, () => ({
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: { loadSession: false, sessionCapabilities: { list: {}, resume: {} } },
+        }));
+        app.onRequest(methods.agent.session.list, ({ params }) => {
+          if (!params?.cursor) {
+            return {
+              sessions: [{ sessionId: 'page-1-sess', cwd: '/repo/page-1', title: 'Page 1' }],
+              nextCursor: 'cursor-2',
+            };
+          }
+          return {
+            sessions: [{ sessionId: 'page-2-sess', cwd: '/repo/page-2', title: 'Page 2' }],
+          };
+        });
+        app.onRequest(methods.agent.session.resume, ({ params }) => {
+          resumedCwd = params.cwd;
+          if (params.cwd !== '/repo/page-2') throw new Error(`unexpected cwd ${params.cwd}`);
+          return {};
+        });
+        app.onRequest(methods.agent.session.prompt, async ({ params, client }) => {
+          await client.notify(methods.client.session.update, {
+            sessionId: params.sessionId,
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'resumed-ok' } },
+          });
+          return { stopReason: 'end_turn' };
+        });
+        return app;
+      },
+    });
+    const wss = new WebSocketServer({ noServer: true });
+    const upgrade = createNodeWebSocketUpgradeHandler(acpServer, wss);
+    const server = http.createServer((_req, res) => res.writeHead(404).end());
+    server.on('upgrade', (req, socket, head) => upgrade(req, socket, head));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const adapter = new AcpAdapter('paged', { id: 'paged', kind: 'acp', transport: 'local', host: '127.0.0.1', port });
+    cleanups.push(async () => {
+      await adapter.close();
+      for (const c of wss.clients) c.terminate();
+      await acpServer.close();
+      wss.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+
+    const events = [];
+    for await (const event of adapter.prompt('page-2-sess', 'continue')) events.push(event);
+    expect(resumedCwd).toBe('/repo/page-2');
+    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'resumed-ok', sessionId: 'page-2-sess' });
+  });
 });

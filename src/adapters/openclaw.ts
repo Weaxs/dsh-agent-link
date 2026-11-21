@@ -50,6 +50,7 @@ export class OpenClawAdapter implements AgentAdapter {
         ? this.gateway.subscribeEvents()
         : {
             next: (sig?: AbortSignal) => this.gateway.nextEvent(sig),
+            error: () => undefined,
             unsubscribe: () => {},
           };
     const waitAbort = new AbortController();
@@ -92,7 +93,9 @@ export class OpenClawAdapter implements AgentAdapter {
       next.catch(() => {});
       while (true) {
         if (signal?.aborted) {
-          await this.cancel(sessionKey).catch(() => {});
+          if (!(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
+            await this.cancel(sessionKey).catch(() => {});
+          }
           return;
         }
         const result = await Promise.race([
@@ -101,10 +104,14 @@ export class OpenClawAdapter implements AgentAdapter {
           aborted,
         ]);
         if (result.kind === 'aborted') {
-          await this.cancel(sessionKey).catch(() => {});
+          if (!(signal?.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
+            await this.cancel(sessionKey).catch(() => {});
+          }
           return;
         }
         if (result.kind === 'done') {
+          const streamError = subscription.error?.();
+          if (streamError) throw streamError;
           const rawStatus = String(result.value.status ?? 'completed').toLowerCase();
           if (rawStatus === 'pending' || rawStatus === 'timeout') {
             completed = this.gateway.request('agent.wait', { runId }, 1_800_000, waitAbort.signal);

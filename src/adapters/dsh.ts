@@ -135,6 +135,7 @@ export class DshAdapter implements AgentAdapter {
           }
         }
         const cursor = Number(waited.state?.cursor ?? afterSeq);
+        rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));
         if (records.length === 0 && waited.reason !== 'timeout') {
           const page = await this.rpc(
             'events',
@@ -152,7 +153,6 @@ export class DshAdapter implements AgentAdapter {
           const failure = durableFailure(turnRecords);
           if (failure) throw new Error(failure);
         }
-        rememberBounded(this.cursors, actualId, Math.max(afterSeq, cursor));
         if (waited.reason !== 'timeout') {
           yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle'), sessionId: actualId };
           return;
@@ -160,7 +160,9 @@ export class DshAdapter implements AgentAdapter {
       }
     } catch (error) {
       if (signal?.aborted) {
-        await this.cancel(actualId).catch(() => {});
+        if (!(signal.reason as { skipRemoteCancel?: boolean } | undefined)?.skipRemoteCancel) {
+          await this.cancel(actualId).catch(() => {});
+        }
         yield { type: 'final', text: output, stopReason: 'cancelled', sessionId: actualId };
         return;
       }

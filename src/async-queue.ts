@@ -8,6 +8,10 @@ export class AsyncQueue<T> {
   private error: unknown;
   private done = false;
 
+  get failure(): unknown {
+    return this.error;
+  }
+
   constructor(
     private readonly maxBuffer = 0,
     private readonly overflow: 'drop-oldest' | 'error' = 'drop-oldest',

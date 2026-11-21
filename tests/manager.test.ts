@@ -121,6 +121,33 @@ describe('AgentManager', () => {
     await manager.wait(job.id);
   });
 
+  it('does not remotely cancel a newer job on the same session when an older job times out', async () => {
+    let remoteCancels = 0;
+    class HangingSessionAdapter extends FakeAdapter {
+      override async *prompt(
+        _session: string | undefined,
+        _text: string,
+        signal?: AbortSignal,
+      ): AsyncIterable<AgentEvent> {
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      override async cancel() {
+        remoteCancels++;
+      }
+    }
+    const manager = new AgentManager([config], 40, () => new HangingSessionAdapter('remote'));
+    const oldJob = manager.start('remote', 'turn 1', 'timeout-session');
+    const newJob = manager.start('remote', 'turn 2', 'timeout-session');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(manager.get(oldJob.id).status).toBe('cancelled');
+    // Only the latest job's own timeout may call adapter.cancel (at most 1, never from oldJob)
+    expect(remoteCancels).toBeLessThanOrEqual(1);
+    await manager.wait(newJob.id);
+  });
+
   it('cancels active work, aborts local stream and rejects unknown agents', async () => {
     let aborted = false;
     class HangingAdapter extends FakeAdapter {

@@ -137,6 +137,11 @@ describe('DSH adapter', () => {
     const events = [];
     for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) events.push(event);
     expect(events.at(-1)).toMatchObject({ type: 'error', text: '400: {"code":"1214"}' });
+
+    // Second turn on the same session must advance afterSeq to 19 and NOT re-report turn 1's error
+    const secondTurn = [];
+    for await (const event of adapter.prompt('dsh-session-1', 'remember AL-TEST')) secondTurn.push(event);
+    expect(secondTurn.at(-1)).toMatchObject({ type: 'final', text: '', stopReason: 'idle' });
   });
 
   it('uses native session RPC with an API cookie and returns assistant output', async () => {

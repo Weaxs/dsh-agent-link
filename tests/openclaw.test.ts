@@ -149,6 +149,59 @@ describe('OpenClaw adapter', () => {
     expect(e2.some((e) => e.type === 'text' && e.text === 'from-2')).toBe(true);
     expect(e2.at(-1)).toMatchObject({ type: 'error', text: 'model crashed', stopReason: 'error' });
   });
+
+  it('fails the run when the subscriber queue overflows even if agent.wait resolves ok first', async () => {
+    process.env.OPENCLAW_GATEWAY_TOKEN = 'token';
+    process.env.DSH_KNOT_STATE_DIR = mkdtempSync(join(tmpdir(), 'dsh-knot-'));
+    const { AsyncQueue } = await import('../src/async-queue.js');
+    const queue = new AsyncQueue<Record<string, any>>(1, 'error');
+    const gateway = {
+      isOpen: true,
+      async openWebSocket() {
+        this.isOpen = true;
+      },
+      async nextEvent() {
+        return {
+          done: false,
+          value: { type: 'event', event: 'connect.challenge', payload: { nonce: 'n', ts: 1737264000000 } },
+        };
+      },
+      subscribeEvents() {
+        return {
+          next: (sig?: AbortSignal) => queue.next(sig),
+          error: () => queue.failure,
+          unsubscribe: () => queue.finish(),
+        };
+      },
+      async request(method: string, params: any) {
+        if (method === 'connect') return { type: 'hello-ok' };
+        if (method === 'sessions.create') return { sessionKey: params.key };
+        if (method === 'agent') {
+          queue.push({ type: 'event', event: 'agent', payload: { runId: 'run-overflow', delta: '1' } });
+          queue.push({ type: 'event', event: 'agent', payload: { runId: 'run-overflow', delta: '2' } });
+          return { runId: 'run-overflow', sessionKey: params.sessionKey };
+        }
+        if (method === 'agent.wait') return { status: 'ok', terminalReply: { text: 'partial' } };
+        return {};
+      },
+      async close() {
+        this.isOpen = false;
+      },
+    };
+    const adapter = new OpenClawAdapter(
+      'claw',
+      { id: 'claw', kind: 'openclaw', transport: 'local' },
+      undefined,
+      gateway as any,
+    );
+    await expect(
+      (async () => {
+        for await (const _event of adapter.prompt('s-overflow', 'work')) {
+          /* drain */
+        }
+      })(),
+    ).rejects.toThrow(/Event queue overflow/);
+  });
 });
 
 describe('device identity', () => {

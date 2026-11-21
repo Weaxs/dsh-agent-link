@@ -191,13 +191,20 @@ export class AgentManager {
     await Promise.allSettled([...this.adapters.values()].map((adapter) => adapter.close()));
   }
 
+  private isLatestSessionJob(job: AgentJob): boolean {
+    return !job.sessionId || this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) === job.id;
+  }
+
   private abortJobsForAgent(agentId: string): void {
     for (const [id, job] of this.jobs) {
       if (job.agentId !== agentId || ['completed', 'failed', 'cancelled'].includes(job.status)) continue;
       job.status = 'cancelled';
       delete job.pendingApproval;
       job.updatedAt = Date.now();
-      this.controllers.get(id)?.abort(new Error(`agent "${agentId}" reconfigured`));
+      const reason = Object.assign(new Error(`agent "${agentId}" reconfigured`), {
+        skipRemoteCancel: !this.isLatestSessionJob(job),
+      });
+      this.controllers.get(id)?.abort(reason);
     }
   }
 
@@ -225,8 +232,12 @@ export class AgentManager {
     const controller = new AbortController();
     this.controllers.set(job.id, controller);
     const timer = setTimeout(() => {
-      controller.abort(new Error(`job timed out after ${this.timeoutMs}ms`));
-      if (job.sessionId) adapter.cancel(job.sessionId).catch(() => {});
+      const owned = this.isLatestSessionJob(job);
+      const reason = Object.assign(new Error(`job timed out after ${this.timeoutMs}ms`), {
+        skipRemoteCancel: !owned,
+      });
+      controller.abort(reason);
+      if (owned && job.sessionId) adapter.cancel(job.sessionId).catch(() => {});
     }, this.timeoutMs);
     job.status = 'running';
     job.updatedAt = Date.now();
