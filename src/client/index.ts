@@ -44,6 +44,7 @@ interface AgentSummary {
   acpCommand?: string;
   model?: string;
   hasToken?: boolean;
+  supportsRespond?: boolean;
 }
 
 interface AgentFormState {
@@ -131,6 +132,7 @@ const DICTS: Record<string, Record<string, string>> = {
     attentionTitle: '需要你处理与后台任务',
     attentionEmpty: '当前没有待确认的审批或运行中的后台任务。',
     wantsApproval: '请求权限确认',
+    approveRemotely: '请前往远端网关确认审批',
     runningNow: '正在后台执行',
     stopTask: '停止',
     agentsHeading: '已连接的远端助手',
@@ -199,6 +201,7 @@ const DICTS: Record<string, Record<string, string>> = {
     attentionTitle: 'Needs Attention & Active Jobs',
     attentionEmpty: 'No pending approvals or running remote jobs.',
     wantsApproval: 'requests approval',
+    approveRemotely: 'Approve in remote gateway',
     runningNow: 'working in background',
     stopTask: 'Stop',
     agentsHeading: 'Connected Remote Agents',
@@ -719,23 +722,25 @@ function makeDashboard(React: ReactModule, ctx: ClientContext) {
                             h(
                               'div',
                               { style: { display: 'flex', gap: '6px' } },
-                              (job.pendingApproval.choices.length
-                                ? job.pendingApproval.choices
-                                : ['approve', 'deny']
-                              ).map((choice) =>
-                                h(
-                                  'button',
-                                  {
-                                    key: choice,
-                                    className: /deny|reject|no/i.test(choice)
-                                      ? 'dk-btn dk-btn-danger'
-                                      : 'dk-btn dk-btn-primary',
-                                    onClick: () =>
-                                      void respondApproval(job.id, job.pendingApproval?.requestId ?? '', choice),
-                                  },
-                                  choice,
-                                ),
-                              ),
+                              agents.find((a) => a.id === job.agentId)?.supportsRespond === false
+                                ? h('span', { className: 'dk-pill-off' }, t('approveRemotely'))
+                                : (job.pendingApproval.choices.length
+                                    ? job.pendingApproval.choices
+                                    : ['approve', 'deny']
+                                  ).map((choice) =>
+                                    h(
+                                      'button',
+                                      {
+                                        key: choice,
+                                        className: /deny|reject|no/i.test(choice)
+                                          ? 'dk-btn dk-btn-danger'
+                                          : 'dk-btn dk-btn-primary',
+                                        onClick: () =>
+                                          void respondApproval(job.id, job.pendingApproval?.requestId ?? '', choice),
+                                      },
+                                      choice,
+                                    ),
+                                  ),
                             ),
                           ),
                           h(

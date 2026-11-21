@@ -58,6 +58,17 @@ describe('read-only MCP endpoint', () => {
   it('initializes and lists only allow-listed sessions', async () => {
     await start();
     expect((await rpc('initialize', { protocolVersion: '2025-03-26' })).result.serverInfo.name).toBe('dsh-knot');
+    expect((await rpc('initialize', { protocolVersion: '9999-01-01' })).result.protocolVersion).toBe('2025-03-26');
+    const badOrigin = await fetch(base, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-token',
+        Origin: 'https://evil.example',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 99, method: 'ping' }),
+    });
+    expect(badOrigin.status).toBe(403);
     const tools = await rpc('tools/list');
     expect(tools.result.tools.map((tool: any) => tool.name)).toContain('dsh_session_watch');
     const result = await rpc('tools/call', { name: 'dsh_sessions_list', arguments: {} });

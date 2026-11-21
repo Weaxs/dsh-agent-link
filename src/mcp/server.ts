@@ -7,6 +7,7 @@ import { VERSION } from '../version.js';
 import type { SessionControllerLike } from './session-service.js';
 
 const PROTOCOL_VERSION = '2025-03-26';
+const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-03-26', '2024-11-05']);
 const MAX_BATCH_SIZE = 50;
 
 class BodyTooLargeError extends Error {}
@@ -89,6 +90,9 @@ export class McpServer {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (pathname !== '/mcp') return json(response, 404, { error: 'Not found' });
     if (request.method !== 'POST') return json(response, 405, { error: 'Use JSON-RPC over POST' }, { Allow: 'POST' });
+    if (!this.isAllowedOrigin(request.headers.origin)) {
+      return json(response, 403, { error: 'Forbidden origin' });
+    }
     if (!verifyBearerToken(request.headers.authorization, this.token!))
       return json(response, 401, { error: 'Unauthorized' });
     let message: any;
@@ -169,14 +173,16 @@ export class McpServer {
       return errorReply(message?.id, -32600, 'Invalid JSON-RPC request');
     const id = message.id;
     try {
-      if (message.method === 'initialize')
+      if (message.method === 'initialize') {
+        const requested = typeof message.params?.protocolVersion === 'string' ? message.params.protocolVersion : '';
+        const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.has(requested) ? requested : PROTOCOL_VERSION;
         return resultReply(id, {
-          protocolVersion:
-            typeof message.params?.protocolVersion === 'string' ? message.params.protocolVersion : PROTOCOL_VERSION,
+          protocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: 'dsh-knot', version: VERSION },
           instructions: 'Only sessions explicitly allow-listed by the local user are visible. All output is redacted.',
         });
+      }
       if (message.method === 'notifications/initialized' || message.method.startsWith('notifications/'))
         return undefined;
       if (message.method === 'ping') return resultReply(id, {});
@@ -272,15 +278,32 @@ export class McpServer {
           cursor = Math.max(cursor, event.seq);
           if (event.seq <= since) continue;
         }
-        const projected =
-          frame.type === 'snapshot' && since > 0 && Array.isArray(frame.records)
-            ? {
-                ...frame,
-                records: frame.records.filter(
-                  (record: any) => typeof record.event?.seq !== 'number' || record.event.seq > since,
-                ),
-              }
-            : frame;
+        let projected: Record<string, unknown> = frame;
+        if (frame.type === 'snapshot' && since > 0 && Array.isArray(frame.records)) {
+          const filtered = frame.records.filter(
+            (record: any) => typeof record.event?.seq !== 'number' || record.event.seq > since,
+          );
+          const seqs = frame.records
+            .map((record: any) => record?.event?.seq)
+            .filter((seq: unknown): seq is number => typeof seq === 'number');
+          const earliest = seqs.length > 0 ? Math.min(...seqs) : undefined;
+          let backfilled = filtered;
+          if (earliest !== undefined && earliest > since + 1) {
+            const older = await this.sessions.events(
+              { address: { kind: 'session', sessionId }, beforeSeq: earliest, maxMessages: 100 },
+              controller.signal,
+            );
+            this.assertAllowed(sessionId);
+            const olderRecords = Array.isArray(older.records)
+              ? older.records.filter(
+                  (record: any) =>
+                    typeof record?.event?.seq === 'number' && record.event.seq > since && record.event.seq < earliest,
+                )
+              : [];
+            backfilled = [...olderRecords, ...filtered];
+          }
+          projected = { ...frame, records: backfilled };
+        }
         const safe = redact(projected);
         bytes += JSON.stringify(safe).length;
         frames.push(safe);
@@ -298,6 +321,21 @@ export class McpServer {
     }
     this.assertAllowed(sessionId);
     return { sessionId, cursor, frames, timedOut };
+  }
+
+  private isAllowedOrigin(origin: string | undefined): boolean {
+    if (!origin) return true;
+    try {
+      const url = new URL(origin);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+      const host = url.hostname.replace(/^\[|\]$/g, '');
+      const boundHost = this.boundAddress?.host.replace(/^\[|\]$/g, '');
+      return (
+        host === 'localhost' || host === '127.0.0.1' || host === '::1' || (Boolean(boundHost) && host === boundHost)
+      );
+    } catch {
+      return false;
+    }
   }
 
   private assertAllowed(sessionId: string): void {

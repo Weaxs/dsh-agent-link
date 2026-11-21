@@ -54,3 +54,10 @@ export function saveStoredState(state: StoredKnotState, file = defaultAgentsFile
   renameSync(temp, file);
   return normalized;
 }
+
+export function updateStoredState(
+  updater: (current: StoredKnotState) => StoredKnotState,
+  file = defaultAgentsFile(),
+): StoredKnotState {
+  return saveStoredState(updater(loadStoredState(file)), file);
+}

@@ -185,6 +185,17 @@ describe('web UI host routes & schemastery Config', () => {
     expect(manager.get(activeJob.id).status).toBe('cancelled');
     expect(loadStoredState().deletedIds).toContain('hermes-local');
 
+    // Concurrent saves preserve both agents without clobbering each other
+    const [s1, s2] = await Promise.all([
+      post(WEB_ROUTES.agentSave, { id: 'concurrent-a', kind: 'hermes', transport: 'local' }),
+      post(WEB_ROUTES.agentSave, { id: 'concurrent-b', kind: 'hermes', transport: 'local' }),
+    ]);
+    expect(s1.ok).toBe(true);
+    expect(s2.ok).toBe(true);
+    const savedIds = loadStoredState().agents.map((a) => a.id);
+    expect(savedIds).toContain('concurrent-a');
+    expect(savedIds).toContain('concurrent-b');
+
     // Deleted static agent stays deleted when plugin reloads
     const registeredTools: string[] = [];
     const effects: Array<() => Promise<void>> = [];

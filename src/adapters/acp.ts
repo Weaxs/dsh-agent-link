@@ -351,6 +351,7 @@ export class AcpAdapter implements AgentAdapter {
 
   private async connect(signal?: AbortSignal): Promise<void> {
     if (this.connection && !this.connection.signal.aborted) return;
+    if (signal?.aborted) throw signal.reason ?? new Error('request aborted');
     if (!this.connecting) {
       this.connecting = this.open()
         .catch(async (error) => {
@@ -362,6 +363,9 @@ export class AcpAdapter implements AgentAdapter {
         .finally(() => {
           this.connecting = undefined;
         });
+      this.connecting.catch(() => {
+        /* prevent unhandledRejection if all callers abort before connect settles */
+      });
     }
     return raceAbort(this.connecting, signal);
   }

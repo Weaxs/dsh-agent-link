@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AcpAdapter } from './adapters/acp.js';
 import { createNativeAdapter, createNativeSessionId } from './adapters/native.js';
-import { LocalOnlyAbortError, secret } from './config.js';
+import { LocalOnlyAbortError, raceAbort, secret } from './config.js';
 import type { AgentAdapter, AgentConfig, AgentJob, PluginConfig } from './types.js';
 
 export type AdapterFactory = (config: AgentConfig) => AgentAdapter;
@@ -13,10 +13,12 @@ export class AgentManager {
   readonly configs: AgentConfig[];
   private readonly factory: AdapterFactory;
   private readonly jobs = new Map<string, AgentJob>();
+  private readonly jobAdapters = new Map<string, AgentAdapter>();
   private readonly completions = new Map<string, Promise<AgentJob>>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly remoteCancelled = new Set<string>();
   private readonly latestSessionJob = new Map<string, string>();
+  private readonly reconfiguring = new Set<string>();
 
   constructor(
     configs: AgentConfig[],
@@ -34,6 +36,7 @@ export class AgentManager {
       'id' | 'kind' | 'transport' | 'host' | 'ssh' | 'port' | 'tls' | 'acpTransport' | 'acpCommand' | 'model'
     > & {
       hasToken: boolean;
+      supportsRespond: boolean;
     }
   > {
     return this.configs.map(
@@ -51,6 +54,7 @@ export class AgentManager {
         hasToken: Boolean(
           secret({ id, kind, transport, host, ssh, port, tls, acpTransport, acpCommand, model, ...rest }),
         ),
+        supportsRespond: typeof this.adapters.get(id)?.respond === 'function',
       }),
     );
   }
@@ -60,30 +64,41 @@ export class AgentManager {
   }
 
   async upsert(config: AgentConfig): Promise<void> {
+    this.reconfiguring.add(config.id);
     const existing = this.adapters.get(config.id);
-    await this.abortJobsForAgent(config.id, existing);
-    if (existing) {
-      await existing.close().catch(() => {
-        /* best-effort cleanup of replaced adapter */
-      });
+    this.adapters.delete(config.id);
+    try {
+      await this.abortJobsForAgent(config.id, existing);
+      if (existing) {
+        await existing.close().catch(() => {
+          /* best-effort cleanup of replaced adapter */
+        });
+      }
+      const index = this.configs.findIndex((item) => item.id === config.id);
+      if (index >= 0) this.configs[index] = config;
+      else this.configs.push(config);
+      this.adapters.set(config.id, this.factory(config));
+    } finally {
+      this.reconfiguring.delete(config.id);
     }
-    const index = this.configs.findIndex((item) => item.id === config.id);
-    if (index >= 0) this.configs[index] = config;
-    else this.configs.push(config);
-    this.adapters.set(config.id, this.factory(config));
   }
 
   async remove(id: string): Promise<boolean> {
+    this.reconfiguring.add(id);
     const existing = this.adapters.get(id);
-    await this.abortJobsForAgent(id, existing);
-    if (!existing) return false;
     this.adapters.delete(id);
     const index = this.configs.findIndex((item) => item.id === id);
     if (index >= 0) this.configs.splice(index, 1);
-    await existing.close().catch(() => {
-      /* best-effort cleanup of removed adapter */
-    });
-    return true;
+    try {
+      await this.abortJobsForAgent(id, existing);
+      if (!existing) return false;
+      await existing.close().catch(() => {
+        /* best-effort cleanup of removed adapter */
+      });
+      return true;
+    } finally {
+      this.reconfiguring.delete(id);
+    }
   }
 
   adapter(id: string): AgentAdapter {
@@ -94,6 +109,9 @@ export class AgentManager {
   }
 
   start(agentId: string, text: string, sessionId: string | undefined, onDone?: (job: AgentJob) => void): AgentJob {
+    if (this.reconfiguring.has(agentId)) {
+      throw new Error(`Agent "${agentId}" is currently being reconfigured or removed`);
+    }
     const adapter = this.adapter(agentId);
     const config = this.configs.find((item) => item.id === agentId)!;
     const remoteSession =
@@ -125,6 +143,7 @@ export class AgentManager {
       text: '',
     };
     this.jobs.set(id, job);
+    this.jobAdapters.set(id, adapter);
     if (remoteSession) this.latestSessionJob.set(sessionKey(agentId, remoteSession), id);
     this.evictFinishedJobs();
     const completion = this.run(job, adapter, text, remoteSession, onDone);
@@ -177,13 +196,17 @@ export class AgentManager {
         `Cannot cancel job ${id}: session "${job.sessionId}" already has a newer job on agent "${job.agentId}"`,
       );
     }
+    const currentAdapter = this.adapters.get(job.agentId);
+    const originalAdapter = this.jobAdapters.get(id);
+    if (originalAdapter && currentAdapter && currentAdapter !== originalAdapter) {
+      throw new Error(`Cannot cancel job ${id}: agent "${job.agentId}" has been reconfigured to a different gateway`);
+    }
     job.status = 'cancelled';
     delete job.pendingApproval;
     job.updatedAt = Date.now();
     this.controllers.get(id)?.abort(new Error('job cancelled'));
-    const adapter = this.adapters.get(job.agentId);
-    if (adapter && job.sessionId) {
-      await adapter.cancel(job.sessionId, signal);
+    if (currentAdapter && job.sessionId) {
+      await currentAdapter.cancel(job.sessionId, signal);
     }
     this.remoteCancelled.add(id);
     return job;
@@ -225,6 +248,7 @@ export class AgentManager {
 
   private async abortJobsForAgent(agentId: string, adapter?: AgentAdapter): Promise<void> {
     const remoteCancels: Array<Promise<void>> = [];
+    const deadlineSignal = AbortSignal.timeout(5_000);
     for (const [id, job] of this.jobs) {
       if (job.agentId !== agentId || ['completed', 'failed', 'cancelled'].includes(job.status)) continue;
       const owned = this.isLatestSessionJob(job);
@@ -235,17 +259,21 @@ export class AgentManager {
       if (owned && adapter && job.sessionId) {
         remoteCancels.push(
           adapter
-            .cancel(job.sessionId)
+            .cancel(job.sessionId, deadlineSignal)
             .then(() => {
               this.remoteCancelled.add(id);
             })
             .catch(() => {
-              /* best-effort remote cancel during reconfigure; retry stays enabled because remoteCancelled is unset */
+              /* best-effort remote cancel during reconfigure; bounded by 5s deadline */
             }),
         );
       }
     }
-    if (remoteCancels.length > 0) await Promise.allSettled(remoteCancels);
+    if (remoteCancels.length > 0) {
+      await raceAbort(Promise.allSettled(remoteCancels), deadlineSignal).catch(() => {
+        /* overall 5s deadline for remote cancellation during reconfigure */
+      });
+    }
     const prefix = `${agentId}\0`;
     for (const key of this.latestSessionJob.keys()) {
       if (key.startsWith(prefix)) this.latestSessionJob.delete(key);
@@ -258,6 +286,7 @@ export class AgentManager {
       if (this.jobs.size <= MAX_JOBS) break;
       if (['completed', 'failed', 'cancelled'].includes(job.status)) {
         this.jobs.delete(id);
+        this.jobAdapters.delete(id);
         this.remoteCancelled.delete(id);
         if (job.sessionId && this.latestSessionJob.get(sessionKey(job.agentId, job.sessionId)) === id) {
           this.latestSessionJob.delete(sessionKey(job.agentId, job.sessionId));

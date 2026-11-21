@@ -145,7 +145,11 @@ describe('OpenClaw adapter', () => {
     const p1 = collect('s1', 'task 1');
     const p2 = collect('s2', 'task 2');
     await new Promise((r) => setTimeout(r, 10));
-    emit({ type: 'event', event: 'agent', payload: { runId: 'run-2', type: 'message.delta', delta: 'from-2' } });
+    emit({
+      type: 'event',
+      event: 'agent',
+      payload: { runId: 'run-2', type: 'message.delta', data: { delta: 'from-2' } },
+    });
     emit({ type: 'event', event: 'agent', payload: { runId: 'run-1', type: 'message.delta', delta: 'from-1' } });
     await new Promise((r) => setTimeout(r, 10));
     waitResolvers.get('run-1')!({ status: 'ok', terminalReply: { text: 'from-1' } });

@@ -24,12 +24,12 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async health(signal?: AbortSignal): Promise<Record<string, unknown>> {
-    await raceAbort(this.connect(), signal);
+    await this.connect(signal);
     return this.gateway.request('health', {}, remaining(15_000, signal), signal);
   }
 
   async listSessions(signal?: AbortSignal): Promise<AgentSession[]> {
-    await raceAbort(this.connect(), signal);
+    await this.connect(signal);
     const value = await this.gateway.request('sessions.list', {}, remaining(30_000, signal), signal);
     const rows = Array.isArray(value) ? value : (value.items ?? value.sessions ?? []);
     return (Array.isArray(rows) ? rows : [])
@@ -44,7 +44,7 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async *prompt(sessionId: string | undefined, text: string, signal?: AbortSignal): AsyncIterable<AgentEvent> {
-    await raceAbort(this.connect(), signal);
+    await this.connect(signal);
     const subscription = this.gateway.subscribeEvents();
     const waitAbort = new AbortController();
     const onAbort = () => waitAbort.abort(signal?.reason ?? new Error('request aborted'));
@@ -146,7 +146,16 @@ export class OpenClawAdapter implements AgentAdapter {
         const eventRun = String(payload.runId ?? payload.run_id ?? '');
         if (eventRun && eventRun !== runId) continue;
         const eventName = String(payload.event ?? payload.type ?? frame.event ?? '');
-        const delta = textOf(payload.delta ?? payload.textDelta ?? payload.content);
+        const nested =
+          payload.data && typeof payload.data === 'object' ? (payload.data as Record<string, unknown>) : undefined;
+        const delta = textOf(
+          payload.delta ??
+            payload.textDelta ??
+            payload.content ??
+            nested?.delta ??
+            nested?.textDelta ??
+            nested?.content,
+        );
         if (delta) {
           output += delta;
           yield { type: 'text', text: delta };
@@ -175,7 +184,7 @@ export class OpenClawAdapter implements AgentAdapter {
   }
 
   async cancel(sessionId: string, signal?: AbortSignal): Promise<void> {
-    await raceAbort(this.connect(), signal);
+    await this.connect(signal);
     await this.gateway.request('sessions.abort', { key: sessionId }, remaining(30_000, signal), signal);
   }
 
@@ -185,19 +194,24 @@ export class OpenClawAdapter implements AgentAdapter {
     await this.transport.close();
   }
 
-  private async connect(): Promise<void> {
+  private async connect(signal?: AbortSignal): Promise<void> {
     if (this.ready && this.gateway.isOpen) return;
+    if (signal?.aborted) throw signal.reason ?? new Error('request aborted');
     this.ready = false;
-    if (this.connecting) return this.connecting;
-    this.connecting = this.handshake()
-      .catch(async (error) => {
-        await this.gateway.close();
-        throw error;
-      })
-      .finally(() => {
-        this.connecting = undefined;
+    if (!this.connecting) {
+      this.connecting = this.handshake()
+        .catch(async (error) => {
+          await this.gateway.close();
+          throw error;
+        })
+        .finally(() => {
+          this.connecting = undefined;
+        });
+      this.connecting.catch(() => {
+        /* prevent unhandledRejection if all callers abort before handshake settles */
       });
-    return this.connecting;
+    }
+    return raceAbort(this.connecting, signal);
   }
 
   private async handshake(): Promise<void> {

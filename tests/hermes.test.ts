@@ -58,6 +58,27 @@ describe('Hermes API Server adapter', () => {
     ).toBe(true);
     expect(transport.requests.some((request) => request.path.endsWith('/stop'))).toBe(true);
   });
+
+  it('ignores approval.responded events and maps run.cancelled to cancelled final', async () => {
+    class CancelAndRespondedTransport extends FakeTransport {
+      override async stream(): Promise<IncomingMessage> {
+        return incoming(
+          'data: {"type":"approval.required","request_id":"req-1","description":"Run rm?","choices":["approve","deny"]}\n\n' +
+            'data: {"type":"approval.responded","request_id":"req-1","choice":"approve"}\n\n' +
+            'data: {"type":"run.cancelled","output":"partial"}\n\n',
+        );
+      }
+    }
+    const adapter = new HermesAdapter(
+      'hermes',
+      { id: 'hermes', kind: 'hermes', transport: 'local' },
+      new CancelAndRespondedTransport(),
+    );
+    const events = [];
+    for await (const event of adapter.prompt('session-1', 'task')) events.push(event);
+    expect(events.filter((e) => e.type === 'approval')).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: 'final', text: 'partial', stopReason: 'cancelled' });
+  });
 });
 
 describe('SSE parser', () => {

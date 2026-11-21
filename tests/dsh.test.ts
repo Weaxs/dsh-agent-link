@@ -227,4 +227,31 @@ describe('DSH adapter', () => {
     const waitCall = transport.calls.find((call) => (call.body as any)?.method === 'session/wait')?.body as any;
     expect(waitCall.payload.args.request.afterSeq).toBe(5);
   });
+
+  it('rejects aborted health() before starting /connect and reports input-required as error', async () => {
+    process.env.DSH_GATEWAY_TOKEN = 'launch-token';
+    class InputRequiredTransport extends FakeTransport {
+      override async request(input: HttpRequest): Promise<HttpResponse> {
+        if (input.path === '/api/session/wait') {
+          return ok({
+            reason: 'input-required',
+            state: { cursor: 9, active: true, running: false },
+            output: { records: [], truncated: false },
+          });
+        }
+        return super.request(input);
+      }
+    }
+    const transport = new InputRequiredTransport();
+    const adapter = new DshAdapter('remote', { id: 'remote', kind: 'dsh', transport: 'local' }, transport);
+
+    const aborted = new AbortController();
+    aborted.abort(new Error('already aborted'));
+    await expect(adapter.health(aborted.signal)).rejects.toThrow(/already aborted/);
+    expect(transport.calls).toHaveLength(0);
+
+    const events = [];
+    for await (const event of adapter.prompt(undefined, 'remember AL-TEST')) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'error', stopReason: 'input-required' });
+  });
 });

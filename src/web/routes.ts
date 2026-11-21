@@ -5,7 +5,7 @@ import type { AgentManager } from '../manager.js';
 import type { McpServer } from '../mcp/server.js';
 import type { SessionControllerLike } from '../mcp/session-service.js';
 import { redact } from '../policy/redact.js';
-import { loadStoredState, saveStoredState } from '../store.js';
+import { updateStoredState } from '../store.js';
 import type { AgentConfig } from '../types.js';
 import { VERSION } from '../version.js';
 
@@ -183,8 +183,7 @@ export function registerWebRoutes(
         if (!sessionId) return errorReply('sessionId is required', 400);
         mcp.setAllowed(sessionId, allow);
         const allowSessions = mcp.listAllowed();
-        const state = loadStoredState();
-        saveStoredState({ ...state, allowSessions });
+        updateStoredState((state) => ({ ...state, allowSessions }));
         return jsonReply({ ok: true, value: { allowSessions } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
@@ -244,12 +243,12 @@ export function registerWebRoutes(
           if (candidate[key] === undefined) delete candidate[key];
         }
         const [normalized] = normalizeConfig({ agents: [candidate] }).agents;
-        const state = loadStoredState();
-        const agents = state.agents.filter((item) => item.id !== normalized!.id);
-        agents.push(normalized!);
-        const deletedIds = state.deletedIds.filter((item) => item !== normalized!.id);
         await manager.upsert(normalized!);
-        saveStoredState({ ...state, agents, deletedIds });
+        updateStoredState((state) => ({
+          ...state,
+          agents: [...state.agents.filter((item) => item.id !== normalized!.id), normalized!],
+          deletedIds: state.deletedIds.filter((item) => item !== normalized!.id),
+        }));
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);
@@ -261,11 +260,12 @@ export function registerWebRoutes(
         const body = await parseBody(request);
         const id = typeof body.id === 'string' ? body.id.trim() : '';
         if (!id) return errorReply('id is required', 400);
-        const state = loadStoredState();
-        const agents = state.agents.filter((item) => item.id !== id);
-        const deletedIds = [...new Set([...state.deletedIds, id])];
         await manager.remove(id);
-        saveStoredState({ ...state, agents, deletedIds });
+        updateStoredState((state) => ({
+          ...state,
+          agents: state.agents.filter((item) => item.id !== id),
+          deletedIds: [...new Set([...state.deletedIds, id])],
+        }));
         return jsonReply({ ok: true, value: { agents: manager.list() } });
       } catch (error) {
         return errorReply(error instanceof Error ? error.message : String(error), 400);

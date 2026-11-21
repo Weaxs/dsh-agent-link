@@ -364,13 +364,34 @@ describe('AgentManager', () => {
       }
       async close() {}
     }
+    // After upsert replaces the adapter, retrying cancel on the old job refuses to target the new gateway
     const dshManager = new AgentManager([dshCfg], 10_000, () => new FailingUpsertCancelAdapter('dsh-reconfig'));
     const dshJob = dshManager.start('dsh-reconfig', 'work', undefined);
     await new Promise((r) => setTimeout(r, 10));
     await dshManager.upsert({ ...dshCfg, model: 'm2' });
     expect(failingCancelAttempts).toBe(1);
-    await dshManager.cancel(dshJob.id);
-    expect(failingCancelAttempts).toBe(2);
+    await expect(dshManager.cancel(dshJob.id)).rejects.toThrow(/reconfigured to a different gateway/);
+    expect(failingCancelAttempts).toBe(1);
+
+    // While remove() is awaiting remote cancel, new jobs on that agent are immediately rejected
+    let releaseRemoveCancel!: () => void;
+    const blockingCfg: AgentConfig = { id: 'blocking', kind: 'dsh', transport: 'local' };
+    class BlockingCancelAdapter extends FailingUpsertCancelAdapter {
+      override async cancel() {
+        await new Promise<void>((resolve) => {
+          releaseRemoveCancel = resolve;
+        });
+      }
+    }
+    const rmManager = new AgentManager([blockingCfg], 10_000, () => new BlockingCancelAdapter('blocking'));
+    const rmJob = rmManager.start('blocking', 'work', undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    const removing = rmManager.remove('blocking');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(() => rmManager.start('blocking', 'sneaky', undefined)).toThrow(/reconfigured or removed/);
+    releaseRemoveCancel();
+    await removing;
+    await rmManager.wait(rmJob.id);
     await dshManager.close();
   });
 });

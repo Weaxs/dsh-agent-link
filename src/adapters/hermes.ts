@@ -81,7 +81,10 @@ export class HermesAdapter implements AgentAdapter {
             name: String(event.name ?? event.tool_name ?? event.tool ?? 'tool'),
           };
         }
-        if (/approval|permission/.test(type)) {
+        if (
+          /approval|permission/.test(type) &&
+          !/responded|resolved|completed|approved|denied|rejected|cancelled/.test(type)
+        ) {
           const requestId = String(event.request_id ?? event.id ?? frame.id ?? '');
           yield {
             type: 'approval',
@@ -94,6 +97,10 @@ export class HermesAdapter implements AgentAdapter {
           terminal = true;
           const finalText = textOf(event.output_text ?? event.output ?? event.response ?? event.message);
           if (finalText && !output.endsWith(finalText)) output = finalText;
+          if (type === 'run.cancelled') {
+            yield { type: 'final', text: output || finalText, stopReason: 'cancelled' };
+            break;
+          }
           const failed = type !== 'run.completed' || event.completed === false || event.error !== undefined;
           yield failed
             ? {

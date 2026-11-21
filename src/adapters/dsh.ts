@@ -155,7 +155,17 @@ export class DshAdapter implements AgentAdapter {
           if (failure) throw new Error(failure);
         }
         if (waited.reason !== 'timeout') {
-          yield { type: 'final', text: output, stopReason: String(waited.reason ?? 'idle'), sessionId: actualId };
+          const reason = String(waited.reason ?? 'idle');
+          if (reason === 'input-required' || reason === 'input_required') {
+            yield {
+              type: 'error',
+              text: 'Remote DSH session requires interactive user input (input-required)',
+              stopReason: reason,
+              sessionId: actualId,
+            };
+            return;
+          }
+          yield { type: 'final', text: output, stopReason: reason, sessionId: actualId };
           return;
         }
       }
@@ -183,6 +193,7 @@ export class DshAdapter implements AgentAdapter {
 
   private async connect(signal?: AbortSignal): Promise<void> {
     if (this.cookie) return;
+    if (signal?.aborted) throw signal.reason ?? new Error('request aborted');
     if (!this.connecting) {
       this.connecting = (async () => {
         const token = secret(this.config);
@@ -198,6 +209,9 @@ export class DshAdapter implements AgentAdapter {
         this.cookie = pair;
       })().finally(() => {
         this.connecting = undefined;
+      });
+      this.connecting.catch(() => {
+        /* prevent unhandledRejection if all callers abort before connect settles */
       });
     }
     return raceAbort(this.connecting, signal);
